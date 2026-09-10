@@ -1,0 +1,30 @@
+# Blueprint Render — déploiement 100% gratuit, un seul service.
+# Le frontend (client/dist) est servi par le serveur Express lui-même
+# (voir server/src/app.js) : même origine que l'API, donc aucun problème de
+# cookie tiers entre deux sous-domaines *.onrender.com séparés.
+#
+# La base de données PostgreSQL n'est PAS définie ici : le Postgres gratuit
+# de Render expire au bout de 30 jours (+ 14 jours de grâce), ce qui ne
+# convient pas à un usage durable. Utiliser Neon (postgres gratuit permanent,
+# sans carte bancaire) et coller son URL de connexion dans DATABASE_URL
+# ci-dessous, dans le tableau de bord Render (jamais commitée dans ce fichier).
+services:
+  - type: web
+    name: mizancarbone
+    runtime: node
+    plan: free
+    buildCommand: cd client && npm install && npm run build && cd ../server && npm install
+    startCommand: cd server && npm run migrate:up && npm run seed && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGIN
+        value: https://mizancarbone.onrender.com

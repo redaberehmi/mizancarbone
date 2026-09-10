@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.backup
+*.local
+npm-debug.log*
+
+# Scripts Postgres embarqué locaux à la machine (chemins temp spécifiques),
+# jamais nécessaires en production (Neon/Render gèrent la base).
+server/.demo-db.mjs
+.tmp-test-pg-handoff.json

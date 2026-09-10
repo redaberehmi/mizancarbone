@@ -1,0 +1,93 @@
+-- ============================================================
+-- MODÈLE DE RÉFÉRENCE — financing_programs & carbon_tax_parameters
+-- ============================================================
+-- Ce fichier n'est JAMAIS exécuté automatiquement (extension .sql.example,
+-- pas .sql — le seed runner de server/src/db/seed/ ne le voit pas, et ce
+-- dossier templates/ n'est de toute façon pas parcouru par npm run seed).
+--
+-- Mode de travail retenu pour ce projet : vous transmettez les valeurs
+-- réelles (avec leur source), Claude les insère lui-même — même discipline
+-- de vérification que pour emission_factors. Ce fichier sert uniquement de
+-- documentation de référence : à quoi ressemble une insertion correcte,
+-- pour que vous sachiez quelles informations préparer avant de les
+-- transmettre. Ne pas l'exécuter tel quel : les valeurs ci-dessous sont des
+-- exemples illustratifs, pas des données réelles.
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- financing_programs — un dispositif de financement/subvention
+-- ------------------------------------------------------------
+-- Colonnes :
+--   name            texte court, obligatoire
+--   description     texte libre, optionnel mais recommandé
+--   subsidy_rate    pourcentage numérique, ex: 80.00 pour "80% du montant" — NULL si non pertinent (ex: prêt à taux zéro sans taux de subvention direct)
+--   cap_amount_mad  plafond en MAD, NULL si aucun plafond connu/applicable
+--   eligibility     texte libre décrivant les critères d'éligibilité
+--   source_url      OBLIGATOIRE EN PRATIQUE : lien vérifiable vers la source officielle (site du programme, texte réglementaire...)
+--   active          true pour qu'il apparaisse dans la liste (GET /api/financing/programs le filtre sur active=true)
+--
+-- Exemple (valeurs fictives, à remplacer) :
+INSERT INTO financing_programs
+  (name, description, subsidy_rate, cap_amount_mad, eligibility, source_url, active)
+VALUES
+  (
+    'NOM DU DISPOSITIF',
+    'Description courte du dispositif et de son objectif.',
+    50.00,                                   -- ou NULL si pas de taux de subvention
+    2000000.00,                              -- ou NULL si pas de plafond
+    'PME industrielles exportatrices, secteur X, critère Y.',
+    'https://exemple.ma/lien-source-officiel',
+    true
+  );
+
+-- Pour retirer un dispositif de la liste sans perdre son historique
+-- (jamais de suppression physique, section 7.8) :
+-- UPDATE financing_programs SET active = false WHERE id = <id>;
+
+
+-- ------------------------------------------------------------
+-- carbon_tax_parameters — taux de la taxe carbone nationale (LF2026)
+-- ------------------------------------------------------------
+-- Colonnes :
+--   rate_per_tco2e    taux en MAD par tCO2e, obligatoire
+--   threshold_tco2e   seuil d'assujettissement en tCO2e, NULL si aucun seuil (taxable dès le premier tCO2e)
+--   taxable_scopes    tableau des scopes inclus dans la base taxable, ex '{1,2}' ou '{1,2,3}' — voir note ci-dessous, OBLIGATOIRE, pas de valeur par défaut
+--   source            OBLIGATOIRE : référence précise (ex: "Loi de Finances 2026, article X" ou lien officiel)
+--   valid_from        date de début de validité de cette version du paramètre
+--   valid_to          NULL = version courante (voir logique de versionnement ci-dessous)
+--
+-- IMPORTANT — taxable_scopes n'est PAS une donnée officiellement confirmée
+-- à ce jour (relecture du 2026-08-07) : c'est vous qui déciderez quelle
+-- combinaison refléter ici une fois la LF2026 stabilisée. Ne pas supposer
+-- "{1,2}" par défaut — le préciser explicitement à chaque transmission de
+-- valeurs.
+--
+-- Exemple (valeurs fictives, à remplacer) :
+INSERT INTO carbon_tax_parameters
+  (rate_per_tco2e, threshold_tco2e, taxable_scopes, source, valid_from)
+VALUES
+  (
+    150.00,                                   -- MAD par tCO2e
+    500,                                      -- ou NULL si aucun seuil
+    '{1,2}',                                  -- scopes réellement soumis, à confirmer
+    'Loi de Finances 2026, article XX (à préciser)',
+    '2026-01-01'
+  );
+
+-- ------------------------------------------------------------
+-- Mettre à jour un taux déjà en place (JAMAIS un UPDATE en place sur une
+-- ligne existante — même logique de versionnement que emission_factors,
+-- section 4 du brief : on ferme l'ancienne version, on ouvre la nouvelle,
+-- l'historique reste consultable pour tout calcul déjà effectué).
+-- ------------------------------------------------------------
+-- 1. Fermer la version actuelle à la veille de la nouvelle date d'effet :
+-- UPDATE carbon_tax_parameters
+--   SET valid_to = '2026-12-31'
+--   WHERE source = 'Loi de Finances 2026, article XX (à préciser)' AND valid_to IS NULL;
+--
+-- 2. Insérer la nouvelle version :
+-- INSERT INTO carbon_tax_parameters
+--   (rate_per_tco2e, threshold_tco2e, taxable_scopes, source, valid_from)
+-- VALUES
+--   (180.00, 500, '{1,2}', 'Loi de Finances 2027, article YY', '2027-01-01');
