@@ -38,6 +38,7 @@ export function CompanyProfile() {
         baseYear: company.baseYear ?? '',
         annualRevenueMad: company.annualRevenueMad ?? '',
         reportingFrequency: company.reportingFrequency ?? '',
+        declaredSizeCategory: company.declaredSizeCategory ?? '',
       });
     }
   }, [company]);
@@ -82,6 +83,7 @@ export function CompanyProfile() {
         baseYear: form.baseYear === '' ? null : Number(form.baseYear),
         annualRevenueMad: form.annualRevenueMad === '' ? null : Number(form.annualRevenueMad),
         reportingFrequency: form.reportingFrequency === '' ? null : form.reportingFrequency,
+        declaredSizeCategory: form.declaredSizeCategory === '' ? null : form.declaredSizeCategory,
         ...(baseYearChanged ? { baseYearChangeReason: baseYearReason.trim() } : {}),
       };
       const data = await api.put('/companies/me', payload);
@@ -203,6 +205,27 @@ export function CompanyProfile() {
             </select>
             <p className="text-xs text-mizan-gris mt-1">Sert à détecter les données manquantes et la complétude au tableau de bord.</p>
           </div>
+        </div>
+
+        <div>
+          <label className="label-field" htmlFor="declaredSizeCategory">
+            Taille d'entreprise (si CA non renseigné)
+          </label>
+          <select
+            id="declaredSizeCategory"
+            className="input-field max-w-[280px]"
+            value={form.declaredSizeCategory}
+            onChange={(e) => setForm({ ...form, declaredSizeCategory: e.target.value })}
+          >
+            <option value="">Non renseignée</option>
+            <option value="tpe">TPE (moins de 10 salariés)</option>
+            <option value="pme">PME</option>
+            <option value="ge">Grande entreprise</option>
+          </select>
+          <p className="text-xs text-mizan-gris mt-1">
+            Utilisée uniquement pour l'éligibilité aux dispositifs de financement, et seulement si le calcul automatique
+            (effectif + chiffre d'affaires, seuils de la Charte de la PME) n'est pas possible.
+          </p>
         </div>
 
         {error && <p className="text-sm text-mizan-alerte">{error}</p>}
