@@ -344,6 +344,106 @@ describe('GET /api/cbam-prep/export.pdf', () => {
   }, 15000);
 });
 
+describe('Checklist et statut des données — préparation CBAM', () => {
+  it('la checklist ne coche aucune case par défaut pour une entreprise sans données', async () => {
+    const res = await agent.get('/api/cbam-prep/summary');
+    expect(res.body.checklist.energieDisponible).toBe(false);
+    expect(res.body.checklist.produitDisponible).toBe(false);
+    expect(res.body.checklist.matierePremiereDisponible).toBe(false);
+    expect(res.body.checklist.facteursDocumentes).toBe(false);
+    // "Données de production" : non applicable en V1, jamais false/true
+    // fabriqué — un champ qui n'existe simplement pas dans le modèle.
+    expect(res.body.checklist.productionDisponible).toBeNull();
+  });
+
+  it('coche les cases correspondant aux données réellement présentes', async () => {
+    const entryRes = await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+    await agent.patch(`/api/activity-entries/${entryRes.body.entry.id}/product-allocation`).send({ productAllocation: 'Bobines acier' });
+    await agent.post('/api/activity-entries/matieres-premieres').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', materialLabel: 'Ferraille', quantity: 12, supplier: 'Sonasid',
+    });
+
+    const res = await agent.get('/api/cbam-prep/summary');
+    expect(res.body.checklist.energieDisponible).toBe(true);
+    expect(res.body.checklist.produitDisponible).toBe(true);
+    expect(res.body.checklist.matierePremiereDisponible).toBe(true);
+    expect(res.body.checklist.facteursDocumentes).toBe(true);
+  });
+
+  it('marque une ligne énergie calculée "reel", jamais "non_calcule"', async () => {
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+    const res = await agent.get('/api/cbam-prep/summary');
+    const energyEntry = res.body.entries.find((e) => e.kind === 'energie');
+    expect(energyEntry.status).toBe('reel');
+  });
+
+  it('marque une ligne matière première "non_calcule" par choix méthodologique, jamais "manquant" (la donnée de traçabilité, elle, est bien présente)', async () => {
+    await agent.post('/api/activity-entries/matieres-premieres').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', materialLabel: 'Ferraille', quantity: 12, supplier: 'Sonasid',
+    });
+    const res = await agent.get('/api/cbam-prep/summary');
+    const materialEntry = res.body.entries.find((e) => e.kind === 'matiere_premiere');
+    expect(materialEntry.status).toBe('non_calcule');
+  });
+
+  it('le groupe "non alloué" est présenté comme non attribué à un produit, jamais comme une allocation automatique', async () => {
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildPreparationReportHtml } = await import('../src/modules/cbam-prep/cbam-prep.service.js');
+    const html = await buildPreparationReportHtml(companyRes.body.company.id);
+
+    expect(html).toContain('non encore attribuées à un produit');
+    expect(html).toContain('affectation à un produit reste manuelle');
+  });
+
+  it('la note de cadrage explicite que la V1 reste un rapport de préparation, jamais un moteur CBAM complet', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildPreparationReportHtml } = await import('../src/modules/cbam-prep/cbam-prep.service.js');
+    const html = await buildPreparationReportHtml(companyRes.body.company.id);
+
+    expect(html).toContain('rapport de préparation des données');
+    expect(html).not.toMatch(/declaration/i);
+  });
+
+  // Régression : trouvée en vérification visuelle du PDF réel (pas par un
+  // test). description venait de emission_results -> emission_factors, donc
+  // vide pour une ligne jamais calculée — exactement la ligne où la
+  // traçabilité (savoir quoi vérifier) compte le plus.
+  it('affiche le code du facteur en description quand une ligne énergie n\'a jamais été calculée (jamais une description vide)', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const companyId = companyRes.body.company.id;
+    await pool.query(
+      `INSERT INTO activity_entries (company_id, site_id, period_start, period_end, factor_code, quantity)
+       VALUES ($1, $2, '2024-01-01', '2024-01-31', 'gasoline_L', 30)`,
+      [companyId, siteId],
+    );
+
+    const res = await agent.get('/api/cbam-prep/summary');
+    const uncalculated = res.body.entries.find((e) => e.status === 'non_calcule' && e.kind === 'energie');
+    expect(uncalculated.description).toBe('gasoline_L');
+  });
+
+  // Régression : "Éléments à vérifier" réutilisait à tort le vocabulaire
+  // Disponible/Manquant de la checklist — zéro élément à vérifier affichait
+  // un tag vert "Disponible", lisible à l'envers (comme si l'existence
+  // d'éléments à vérifier était la donnée positive recherchée).
+  it('la ligne "Éléments à vérifier" de la checklist n\'affiche jamais le mot "Disponible" quand il n\'y a rien à vérifier', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildPreparationReportHtml } = await import('../src/modules/cbam-prep/cbam-prep.service.js');
+    const html = await buildPreparationReportHtml(companyRes.body.company.id);
+
+    const rowMatch = html.match(/Éléments à vérifier<\/td>.*?<\/tr>/s);
+    expect(rowMatch).not.toBeNull();
+    expect(rowMatch[0]).not.toContain('>Disponible<');
+  });
+});
+
 describe('Isolation multi-tenant — préparation CBAM', () => {
   it("empêche l'entreprise B de voir les produits/le résumé de l'entreprise A — même quand B a ses propres données", async () => {
     // Preuve plus solide qu'une simple liste vide côté B : les DEUX

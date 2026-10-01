@@ -2,6 +2,7 @@ import { pool, withTransaction } from '../../config/db.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { DIRECT_ENTRY_CATEGORIES, RAW_MATERIAL_FACTOR_CODE } from '../activity-entries/constants.js';
 import { scope3RatioFactorCode, SCOPE3_RATIO_UNCERTAINTY } from './constants.js';
+import { determineAggregateStatus } from '../reports/report-formatting.js';
 
 // Sélectionne la version du facteur valide PENDANT toute la période donnée
 // (period_start/period_end de l'entrée ou de l'estimation Scope 3) — jamais
@@ -193,17 +194,81 @@ export async function computeResultForEnergyEntry(entryId, factor) {
 // le market-based affiché est identique au location-based par défaut, comme
 // prévu par le brief ("sauf si contrat spécifique — non développé en V1").
 // ============================================================
-export async function getEmissionsSummary(companyId) {
-  const rows = await pool.query(
-    `SELECT er.scope, ef.category, ae.site_id, s.name AS site_name,
-            ae.period_start, ae.period_end, ae.product_allocation, er.tco2e
-     FROM emission_results er
-     JOIN activity_entries ae ON ae.id = er.activity_entry_id
-     JOIN emission_factors ef ON ef.id = er.emission_factor_id
-     LEFT JOIN sites s ON s.id = ae.site_id
-     WHERE ae.company_id = $1 AND ae.deleted_at IS NULL`,
+// ============================================================
+// Statut par poste (Scope 1 / Scope 2 LB / Scope 2 MB / Scope 3), utilisé
+// par les rapports pour ne jamais confondre "0 calculé" et "non calculé"
+// (voir report-formatting.js). Contrairement à la requête ci-dessus
+// (JOIN sur emission_results), celle-ci part de activity_entries et fait un
+// LEFT JOIN : une entrée saisie mais jamais calculée (facteur manquant pour
+// la période) doit compter dans entryCount sans compter dans
+// calculatedCount — c'est cette différence qui distingue "non_calcule" de
+// "manquant". Le scope/la catégorie d'une entrée non calculée est retrouvé
+// via le catalogue emission_factors par factor_code (n'importe quelle
+// version : scope/category sont stables d'une version à l'autre d'un même
+// code, seuls value_kgco2e/source changent — confirmé par le mécanisme de
+// réversionnement des facteurs).
+// ============================================================
+async function getScopeEntryClassification(companyId) {
+  const result = await pool.query(
+    `SELECT ae.id,
+            er.tco2e, er.verification_status,
+            COALESCE(result_ef.scope, catalog_ef.scope) AS scope,
+            COALESCE(result_ef.category, catalog_ef.category) AS category
+     FROM activity_entries ae
+     LEFT JOIN emission_results er ON er.activity_entry_id = ae.id
+     LEFT JOIN emission_factors result_ef ON result_ef.id = er.emission_factor_id
+     LEFT JOIN LATERAL (
+       SELECT scope, category FROM emission_factors ef2
+       WHERE ef2.code = ae.factor_code
+       ORDER BY ef2.valid_from DESC
+       LIMIT 1
+     ) catalog_ef ON true
+     WHERE ae.company_id = $1 AND ae.deleted_at IS NULL AND ae.material_label IS NULL`,
     [companyId],
   );
+
+  const buckets = {
+    scope1: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
+    scope2LocationBased: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
+    scope2MarketBased: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
+    scope3: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
+  };
+
+  for (const row of result.rows) {
+    let bucket = null;
+    if (row.scope === 1) bucket = buckets.scope1;
+    else if (row.scope === 2 && row.category === 'electricite_location_based') bucket = buckets.scope2LocationBased;
+    else if (row.scope === 2 && row.category === 'electricite_market_based') bucket = buckets.scope2MarketBased;
+    else if (row.scope === 3) bucket = buckets.scope3;
+    // scope/category encore indéterminé (facteur jamais vu, même au
+    // catalogue) : n'entre dans aucun poste, jamais compté au hasard.
+    if (!bucket) continue;
+
+    bucket.entryCount += 1;
+    if (row.tco2e !== null) {
+      bucket.calculatedCount += 1;
+      bucket.sumTco2e += Number(row.tco2e);
+      if (row.verification_status === 'partiellement_verifie') bucket.hasPartiallyVerified = true;
+    }
+  }
+
+  return buckets;
+}
+
+export async function getEmissionsSummary(companyId) {
+  const [rows, classification] = await Promise.all([
+    pool.query(
+      `SELECT er.scope, ef.category, ae.site_id, s.name AS site_name,
+              ae.period_start, ae.period_end, ae.product_allocation, er.tco2e
+       FROM emission_results er
+       JOIN activity_entries ae ON ae.id = er.activity_entry_id
+       JOIN emission_factors ef ON ef.id = er.emission_factor_id
+       LEFT JOIN sites s ON s.id = ae.site_id
+       WHERE ae.company_id = $1 AND ae.deleted_at IS NULL`,
+      [companyId],
+    ),
+    getScopeEntryClassification(companyId),
+  ]);
 
   const bySite = new Map();
   const byPeriod = new Map();
@@ -247,12 +312,29 @@ export async function getEmissionsSummary(companyId) {
     byProduct.get(productKey).totalTco2e += tco2e;
   }
 
+  // Statut par poste — jamais déduit du seul booléen "a des données" : un
+  // scope avec des entrées saisies mais aucun calcul possible (facteur
+  // manquant) est 'non_calcule', pas 'manquant' ; le Scope 2 market-based
+  // reprend le statut du location-based quand il est défaulté, puisque le
+  // nombre affiché est alors littéralement le même (voir
+  // scope2MarketBasedIsDefaulted déjà utilisé pour la mise en garde texte).
+  const scope1Status = determineAggregateStatus(classification.scope1);
+  const scope2LocationBasedStatus = determineAggregateStatus(classification.scope2LocationBased);
+  const scope2MarketBasedStatus = hasExplicitMarketBased
+    ? determineAggregateStatus(classification.scope2MarketBased)
+    : scope2LocationBasedStatus;
+  const scope3Status = determineAggregateStatus({ ...classification.scope3, isEstimation: true });
+
   return {
     scope1Tco2e: scope1,
+    scope1Status,
     scope2LocationBasedTco2e: scope2LocationBased,
+    scope2LocationBasedStatus,
     scope2MarketBasedTco2e: hasExplicitMarketBased ? scope2MarketBased : scope2LocationBased,
     scope2MarketBasedIsDefaulted: !hasExplicitMarketBased,
+    scope2MarketBasedStatus,
     scope3Tco2e: scope3,
+    scope3Status,
     scope3Uncertainty: scope3 > 0 ? SCOPE3_RATIO_UNCERTAINTY : null,
     bySite: [...bySite.values()],
     byPeriod: [...byPeriod.values()].sort((a, b) => (a.periodStart < b.periodStart ? 1 : -1)),

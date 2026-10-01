@@ -55,10 +55,17 @@ const FONT_FACES = `
   }
 `;
 
+// Version du FORMAT de rapport (mise en page/sections), pas des données
+// qu'il contient — incrémentée si la structure du PDF change de façon
+// notable, pour qu'un destinataire externe (client européen, partenaire
+// financier) puisse repérer si deux exports qu'il reçoit à des dates
+// différentes suivent la même structure.
+export const REPORT_FORMAT_VERSION = '1.1';
+
 // Gabarit HTML brandé partagé par tous les exports PDF de l'application
 // (Module 4 en premier, réutilisé tel quel par le Module 6). Centralise la
 // charte graphique (section 3) pour ne pas la redupliquer à chaque module.
-export function renderBrandedHtml({ title, companyName, generatedAtLabel, bodyHtml }) {
+export function renderBrandedHtml({ title, companyName, generatedAtLabel, bodyHtml, reportVersion = REPORT_FORMAT_VERSION }) {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -112,6 +119,33 @@ export function renderBrandedHtml({ title, companyName, generatedAtLabel, bodyHt
     padding: 1px 6px;
     margin-left: 4px;
   }
+  .status-tag {
+    display: inline-block;
+    font-size: 9.5px;
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .status-tag[data-status="manquant"] { color: #A5342A; background: rgba(165,52,42,0.08); }
+  .status-tag[data-status="non_calcule"] { color: #96650E; background: rgba(150,101,14,0.10); }
+  .status-tag[data-status="estime"] { color: #33404A; background: rgba(91,102,112,0.12); }
+  .status-tag[data-status="zero_reel"],
+  .status-tag[data-status="reel"] { color: #0B6E4F; background: rgba(11,110,79,0.08); }
+  .kpi-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 14px 0 20px;
+  }
+  .kpi-tile {
+    flex: 1 1 140px;
+    border: 1px solid #BFE3D6;
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .kpi-tile .kpi-label { font-size: 9.5px; color: #5B6670; text-transform: uppercase; letter-spacing: 0.03em; }
+  .kpi-tile .kpi-value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; margin-top: 2px; }
+  .page-break { page-break-after: always; }
   footer.doc-footer {
     margin-top: 24px;
     padding-top: 8px;
@@ -130,6 +164,7 @@ export function renderBrandedHtml({ title, companyName, generatedAtLabel, bodyHt
     <div class="meta">
       ${companyName ? `<div>${escapeHtml(companyName)}</div>` : ''}
       <div>Généré le ${escapeHtml(generatedAtLabel)}</div>
+      <div>Format de rapport v${escapeHtml(reportVersion)}</div>
     </div>
   </header>
   <h1>${escapeHtml(title)}</h1>
@@ -158,7 +193,20 @@ export async function htmlToPdfBuffer(html) {
     // une page qui serait retombée sur une police de repli par timing.
     await page.setContent(html, { waitUntil: 'load' });
     await page.evaluateHandle('document.fonts.ready');
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
+    // Le header/footerTemplate de Puppeteer s'exécute hors du document
+    // principal (pas d'accès aux polices @font-face embarquées ni au CSS de
+    // la page) — d'où les polices système ci-dessous, volontairement
+    // neutres, réservées à la seule pagination.
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate:
+        '<div style="width:100%;font-size:8px;color:#5B6670;text-align:center;font-family:Arial,sans-serif;">' +
+        'Page <span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      margin: { top: '20mm', bottom: '18mm', left: '16mm', right: '16mm' },
+    });
     // Les versions récentes de Puppeteer renvoient un Uint8Array, pas un
     // Buffer Node — sans cette conversion, .toString() et d'autres API
     // orientées Buffer (res.send, comparaisons de magic bytes) ne se

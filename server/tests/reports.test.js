@@ -165,6 +165,122 @@ describe('GET /api/reports/export.pdf', () => {
   });
 });
 
+describe('Statut des données (0 réel / non calculé / manquant / estimé) — Bilan Carbone', () => {
+  it('affiche "Manquant" pour un scope sans aucune entrée saisie, jamais "0"', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyRes.body.company.id);
+
+    expect(html).toMatch(/data-status="manquant"/);
+    expect(html).not.toContain('<td>Scope 1</td><td class="mono">0</td>');
+  });
+
+  it('affiche "Non calculé" (pas "0") pour une entrée saisie mais dont le facteur n\'a pas encore tourné', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const companyId = companyRes.body.company.id;
+
+    // Insertion directe (bypass du hook de calcul automatique à la création,
+    // même technique que tests/calculation.test.js "rattrape une entrée
+    // insérée sans passer par le service") : reproduit l'état réel "donnée
+    // saisie, calcul pas encore fait", impossible à obtenir via l'API seule.
+    await pool.query(
+      `INSERT INTO activity_entries (company_id, site_id, period_start, period_end, factor_code, quantity)
+       VALUES ($1, $2, '2024-01-01', '2024-01-31', 'diesel_L', 100)`,
+      [companyId, siteId],
+    );
+
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyId);
+
+    expect(html).toContain('Non calculé');
+    expect(html).toMatch(/data-status="non_calcule"/);
+  });
+
+  it('affiche "0" (pas "Non calculé"/"Manquant") pour un calcul réel dont le résultat est exactement zéro', async () => {
+    await pool.query(
+      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
+       VALUES ('test_zero_factor', 'Facteur test zéro', 1, 'combustion_fixe', 'L', 0, 'Test zéro', true, 'MA', '2024-01-01')`,
+    );
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'test_zero_factor', quantity: 100,
+    });
+
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyRes.body.company.id);
+
+    expect(html).toMatch(/data-status="zero_reel"/);
+    expect(html).toContain('<td>Scope 1</td><td class="mono">0</td>');
+
+    await pool.query(`DELETE FROM activity_entries WHERE factor_code = 'test_zero_factor'`);
+    await pool.query(`DELETE FROM emission_factors WHERE code = 'test_zero_factor'`);
+  });
+
+  it('marque le Scope 3 "estimé" une fois calculé, jamais confondu avec un calcul direct réel', async () => {
+    await pool.query(
+      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
+       VALUES ('scope3_ratio_metallurgie', 'Ratio test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
+    );
+    await pool.query(
+      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
+       VALUES ('EUR', 'MAD', 10, 'Test rate', '2024-01-01')`,
+    );
+    await agent.post('/api/calculations/scope3/estimate').send({
+      periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000,
+    });
+
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyRes.body.company.id);
+
+    expect(html).toMatch(/data-status="estime"/);
+
+    await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
+    await pool.query(`DELETE FROM emission_factors WHERE source = 'Test ADEME'`);
+    await pool.query(`DELETE FROM exchange_rates WHERE source = 'Test rate'`);
+  });
+
+  it('marque le total tCO2e "partiel" dès qu\'un des postes qui le composent est manquant ou non calculé, jamais un total qui a l\'air complet', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyRes.body.company.id);
+
+    // Entreprise fraîchement créée : aucune donnée -> tous les scopes sont
+    // "manquant" -> le total doit être présenté comme partiel, pas "0".
+    expect(html).toContain('Partiel');
+  });
+
+  // Régression : trouvée en vérification visuelle du PDF réel (pas par un
+  // test), pas par le code lui-même. Un scope avec une entrée calculée ET
+  // une entrée non calculée affichait "Réel" tout court sur la base d'un
+  // total qui excluait silencieusement l'entrée non calculée — exactement
+  // la confusion 0/non-calculé que ce chantier devait éliminer, juste
+  // décalée au niveau agrégat plutôt qu'au niveau de la valeur elle-même.
+  it('signale un scope comme incomplet quand il mélange une entrée calculée et une entrée non calculée, jamais un simple "Réel"', async () => {
+    const companyRes = await agent.get('/api/companies/me');
+    const companyId = companyRes.body.company.id;
+
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+    // Deuxième entrée Scope 1, jamais calculée (même technique d'insertion
+    // directe que le test "Non calculé" ci-dessus).
+    await pool.query(
+      `INSERT INTO activity_entries (company_id, site_id, period_start, period_end, factor_code, quantity)
+       VALUES ($1, $2, '2024-02-01', '2024-02-29', 'gasoline_L', 50)`,
+      [companyId, siteId],
+    );
+
+    const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
+    const html = await buildReportHtml(companyId);
+
+    expect(html).toContain('données incomplètes');
+    expect(html).toContain('(partiel)');
+    // Le total composite doit aussi être marqué partiel, pas juste le poste.
+    expect(html).toContain('Partiel — voir statuts ci-dessous');
+  });
+});
+
 describe('Isolation multi-tenant — reports', () => {
   it("le CSV de l'entreprise B ne contient jamais les données de l'entreprise A", async () => {
     await agent.post('/api/activity-entries/energie').send({
