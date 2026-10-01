@@ -2,8 +2,8 @@ import * as service from './financing.service.js';
 
 export async function listPrograms(req, res, next) {
   try {
-    const programs = await service.listActiveFinancingPrograms();
-    res.json({ programs });
+    const result = await service.listActiveFinancingPrograms(req.auth.companyId);
+    res.json(result);
   } catch (err) {
     next(err);
   }

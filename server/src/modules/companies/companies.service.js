@@ -3,7 +3,7 @@ import { AppError } from '../../middleware/errorHandler.js';
 
 export async function getCompany(companyId) {
   const result = await pool.query(
-    `SELECT id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency, created_at
+    `SELECT id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency, declared_size_category, created_at
      FROM companies WHERE id = $1`,
     [companyId],
   );
@@ -19,7 +19,7 @@ export async function getCompany(companyId) {
 export async function updateCompanyProfile(companyId, userId, changes) {
   return withTransaction(async (client) => {
     const current = await client.query(
-      `SELECT id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency
+      `SELECT id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency, declared_size_category
        FROM companies WHERE id = $1 FOR UPDATE`,
       [companyId],
     );
@@ -54,14 +54,15 @@ export async function updateCompanyProfile(companyId, userId, changes) {
       base_year: changes.baseYear === undefined ? company.base_year : changes.baseYear,
       annual_revenue_mad: changes.annualRevenueMad === undefined ? company.annual_revenue_mad : changes.annualRevenueMad,
       reporting_frequency: changes.reportingFrequency === undefined ? company.reporting_frequency : changes.reportingFrequency,
+      declared_size_category: changes.declaredSizeCategory === undefined ? company.declared_size_category : changes.declaredSizeCategory,
     };
 
     const result = await client.query(
       `UPDATE companies SET name = $1, sector = $2, headcount = $3, base_year = $4,
-              annual_revenue_mad = $5, reporting_frequency = $6
-       WHERE id = $7
-       RETURNING id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency, created_at`,
-      [next.name, next.sector, next.headcount, next.base_year, next.annual_revenue_mad, next.reporting_frequency, companyId],
+              annual_revenue_mad = $5, reporting_frequency = $6, declared_size_category = $7
+       WHERE id = $8
+       RETURNING id, name, sector, headcount, base_year, annual_revenue_mad, reporting_frequency, declared_size_category, created_at`,
+      [next.name, next.sector, next.headcount, next.base_year, next.annual_revenue_mad, next.reporting_frequency, next.declared_size_category, companyId],
     );
 
     return result.rows[0];

@@ -13,6 +13,7 @@ function serializeCompany(row) {
     baseYear: row.base_year,
     annualRevenueMad: row.annual_revenue_mad === null ? null : Number(row.annual_revenue_mad),
     reportingFrequency: row.reporting_frequency,
+    declaredSizeCategory: row.declared_size_category,
     createdAt: row.created_at,
   };
 }

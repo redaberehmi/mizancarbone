@@ -18,28 +18,42 @@
 -- ------------------------------------------------------------
 -- financing_programs — un dispositif de financement/subvention
 -- ------------------------------------------------------------
--- Colonnes :
+-- Depuis le Module 7 (V1.5), un programme n'a plus un taux unique : il peut
+-- combiner plusieurs volets de financement (financing_program_components,
+-- taux différents, ex. "investissement" vs "conseil et expertise technique")
+-- et couvrir plusieurs catégories de projets éligibles
+-- (financing_program_categories) — les deux sont indépendantes l'une de
+-- l'autre. Voir Tatwir Croissance Verte (seed 005) pour un exemple réel.
+--
+-- Colonnes de financing_programs :
 --   name            texte court, obligatoire
 --   description     texte libre, optionnel mais recommandé
---   subsidy_rate    pourcentage numérique, ex: 80.00 pour "80% du montant" — NULL si non pertinent (ex: prêt à taux zéro sans taux de subvention direct)
---   cap_amount_mad  plafond en MAD, NULL si aucun plafond connu/applicable
---   eligibility     texte libre décrivant les critères d'éligibilité
+--   eligibility     texte libre décrivant les critères d'éligibilité généraux
 --   source_url      OBLIGATOIRE EN PRATIQUE : lien vérifiable vers la source officielle (site du programme, texte réglementaire...)
 --   active          true pour qu'il apparaisse dans la liste (GET /api/financing/programs le filtre sur active=true)
 --
--- Exemple (valeurs fictives, à remplacer) :
-INSERT INTO financing_programs
-  (name, description, subsidy_rate, cap_amount_mad, eligibility, source_url, active)
-VALUES
-  (
-    'NOM DU DISPOSITIF',
-    'Description courte du dispositif et de son objectif.',
-    50.00,                                   -- ou NULL si pas de taux de subvention
-    2000000.00,                              -- ou NULL si pas de plafond
-    'PME industrielles exportatrices, secteur X, critère Y.',
-    'https://exemple.ma/lien-source-officiel',
-    true
-  );
+-- Colonnes de financing_program_components (un programme peut en avoir 0, 1 ou plusieurs) :
+--   label               ex: 'Investissement', 'Conseil et expertise technique'
+--   beneficiary_type    'PME' | 'TPE' | NULL si le taux ne distingue pas les deux
+--   subsidy_rate_pct    NULL tant que non confirmé — jamais une valeur estimée
+--   cap_amount_mad      plafond propre à ce volet, NULL si aucun/inconnu
+--   notes               hypothèses à vérifier, sous-mécanismes non confirmés...
+--   source              OBLIGATOIRE
+--   active              false = structurellement présent mais taux non confirmé, jamais affiché comme si ça l'était
+--
+-- Exemple (valeurs fictives, à remplacer) — le sous-select évite de dépendre
+-- d'un id auto-généré connu à l'avance (name doit être UNIQUE, déjà le cas) :
+INSERT INTO financing_programs (name, description, eligibility, source_url, active)
+VALUES ('NOM DU DISPOSITIF', 'Description courte du dispositif et de son objectif.', 'PME industrielles exportatrices, secteur X, critère Y.', 'https://exemple.ma/lien-source-officiel', true)
+ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO financing_program_components (financing_program_id, label, beneficiary_type, subsidy_rate_pct, cap_amount_mad, source, active)
+VALUES ((SELECT id FROM financing_programs WHERE name = 'NOM DU DISPOSITIF'), 'Investissement', NULL, 50.00, 2000000.00, 'https://exemple.ma/lien-source-officiel', true)
+ON CONFLICT (financing_program_id, label, beneficiary_type) DO NOTHING;
+
+INSERT INTO financing_program_categories (financing_program_id, label)
+VALUES ((SELECT id FROM financing_programs WHERE name = 'NOM DU DISPOSITIF'), 'Catégorie de projet éligible X')
+ON CONFLICT (financing_program_id, label) DO NOTHING;
 
 -- Pour retirer un dispositif de la liste sans perdre son historique
 -- (jamais de suppression physique, section 7.8) :
