@@ -119,7 +119,7 @@ export function CbamPreparation() {
             </div>
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-mizan-gris border-b border-mizan-menthe/60">
+                <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
                   <th className="py-2 pr-3">Site</th>
                   <th className="py-2 pr-3">Période</th>
                   <th className="py-2 pr-3">Nature</th>
@@ -131,7 +131,7 @@ export function CbamPreparation() {
               </thead>
               <tbody>
                 {group.entries.map((entry) => (
-                  <tr key={entry.id} className="border-b border-mizan-menthe/30">
+                  <tr key={entry.id} className="row-bi border-b border-mizan-menthe/60">
                     <td className="py-2 pr-3">{entry.siteName ?? '—'}</td>
                     <td className="py-2 pr-3 font-data">{entry.periodStart} → {entry.periodEnd}</td>
                     <td className="py-2 pr-3">

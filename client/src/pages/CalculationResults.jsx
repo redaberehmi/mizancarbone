@@ -136,14 +136,14 @@ export function CalculationResults() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-mizan-gris border-b border-mizan-menthe/60">
+              <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
                 <th className="py-2 pr-3">Site</th>
                 <th className="py-2">Total (tCO2e)</th>
               </tr>
             </thead>
             <tbody>
               {summary.bySite.map((s) => (
-                <tr key={s.siteId ?? 'sans-site'} className="border-b border-mizan-menthe/30">
+                <tr key={s.siteId ?? 'sans-site'} className="row-bi border-b border-mizan-menthe/60">
                   <td className="py-2 pr-3">{s.siteName ?? 'Sans site (estimation Scope 3)'}</td>
                   <td className="py-2 font-data">{formatTco2e(s.totalTco2e)}</td>
                 </tr>
@@ -160,14 +160,14 @@ export function CalculationResults() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-mizan-gris border-b border-mizan-menthe/60">
+              <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
                 <th className="py-2 pr-3">Période</th>
                 <th className="py-2">Total (tCO2e)</th>
               </tr>
             </thead>
             <tbody>
               {summary.byPeriod.map((p) => (
-                <tr key={`${p.periodStart}_${p.periodEnd}`} className="border-b border-mizan-menthe/30">
+                <tr key={`${p.periodStart}_${p.periodEnd}`} className="row-bi border-b border-mizan-menthe/60">
                   <td className="py-2 pr-3 font-data">{p.periodStart} → {p.periodEnd}</td>
                   <td className="py-2 font-data">{formatTco2e(p.totalTco2e)}</td>
                 </tr>
@@ -188,14 +188,14 @@ export function CalculationResults() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-mizan-gris border-b border-mizan-menthe/60">
+              <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
                 <th className="py-2 pr-3">Produit</th>
                 <th className="py-2">Total (tCO2e)</th>
               </tr>
             </thead>
             <tbody>
               {summary.byProduct.map((p) => (
-                <tr key={p.productAllocation ?? 'non-alloue'} className="border-b border-mizan-menthe/30">
+                <tr key={p.productAllocation ?? 'non-alloue'} className="row-bi border-b border-mizan-menthe/60">
                   <td className="py-2 pr-3">{p.productAllocation ?? 'Non alloué'}</td>
                   <td className="py-2 font-data">{formatTco2e(p.totalTco2e)}</td>
                 </tr>
@@ -297,7 +297,7 @@ export function CalculationResults() {
           <h2 className="font-display font-bold text-mizan-ardoise mb-4">Estimations Scope 3 précédentes</h2>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-mizan-gris border-b border-mizan-menthe/60">
+              <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
                 <th className="py-2 pr-3">Période</th>
                 <th className="py-2 pr-3">Montant (k€)</th>
                 <th className="py-2">tCO2e</th>
@@ -305,7 +305,7 @@ export function CalculationResults() {
             </thead>
             <tbody>
               {estimates.map((e) => (
-                <tr key={e.entry_id} className="border-b border-mizan-menthe/30">
+                <tr key={e.entry_id} className="row-bi border-b border-mizan-menthe/60">
                   <td className="py-2 pr-3 font-data">{e.period_start} → {e.period_end}</td>
                   <td className="py-2 pr-3 font-data">{Number(e.amount_keur).toLocaleString('fr-FR')}</td>
                   <td className="py-2 font-data">{formatTco2e(e.tco2e)}</td>

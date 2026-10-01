@@ -25,6 +25,10 @@ function navItemsForCompany(company) {
   return items;
 }
 
+// Mise en page type ERP : navigation latérale fixe + zone de contenu pleine
+// largeur sur fond gris clair — mêmes éléments de navigation qu'avant
+// (navItemsForCompany, inchangé), seule la disposition change (ligne
+// horizontale -> colonne latérale).
 export function Layout({ children }) {
   const { user, company, logout } = useAuth();
   const navigate = useNavigate();
@@ -36,42 +40,43 @@ export function Layout({ children }) {
   };
 
   return (
-    <div className="min-h-screen bg-mizan-fond">
-      <header className="bg-white border-b border-mizan-menthe/60">
-        <div className="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between">
-          <Link to="/">
-            <Logo />
-          </Link>
-          {user && (
-            <nav className="flex items-center gap-1 text-sm">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `px-3 py-1.5 rounded-lg font-medium ${
-                      isActive ? 'bg-mizan-menthe/40 text-mizan-vert' : 'text-mizan-gris hover:text-mizan-vert'
-                    }`
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-          )}
-          {user && (
-            <div className="flex items-center gap-4 text-sm">
-              <span className="text-mizan-gris">
-                {company?.name} · <span className="font-data">{user.email}</span>
-              </span>
-              <button onClick={handleLogout} className="btn-secondary py-1.5 px-3">
-                Déconnexion
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+    <div className="min-h-screen bg-mizan-fond flex">
+      {user && (
+        <aside className="w-60 shrink-0 bg-white border-r border-mizan-menthe flex flex-col">
+          <div className="h-16 flex items-center px-5 border-b border-mizan-menthe">
+            <Link to="/">
+              <Logo badgeSize={30} />
+            </Link>
+          </div>
+          <nav className="flex-1 py-3 px-2 space-y-0.5 text-sm">
+            {navItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 px-3 py-2 rounded-md font-medium border-l-2 ${
+                    isActive
+                      ? 'bg-mizan-vert/[0.06] border-mizan-vert text-mizan-vert'
+                      : 'border-transparent text-mizan-gris hover:bg-mizan-fond hover:text-mizan-ardoise'
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+          <div className="border-t border-mizan-menthe p-4 text-xs">
+            <p className="font-medium text-mizan-ardoise truncate">{company?.name}</p>
+            <p className="text-mizan-gris font-data truncate">{user.email}</p>
+            <button onClick={handleLogout} className="btn-secondary w-full mt-3 py-1.5">
+              Déconnexion
+            </button>
+          </div>
+        </aside>
+      )}
+      <div className="flex-1 min-w-0">
+        <main className="px-8 py-6">{children}</main>
+      </div>
     </div>
   );
 }

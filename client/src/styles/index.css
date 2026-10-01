@@ -13,21 +13,21 @@ body {
 }
 
 .card {
-  @apply bg-white rounded-card border border-mizan-menthe/60 p-6;
+  @apply bg-white rounded-card border border-mizan-menthe shadow-panel p-5;
 }
 
 .btn-primary {
-  @apply bg-mizan-vert hover:bg-mizan-vert-secondaire text-white font-medium
-    rounded-lg px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply bg-mizan-vert hover:bg-mizan-vert-secondaire text-white font-medium text-sm
+    rounded-md px-3.5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .btn-secondary {
-  @apply bg-white hover:bg-mizan-menthe/30 text-mizan-ardoise font-medium
-    rounded-lg px-4 py-2 border border-mizan-gris/30 transition-colors;
+  @apply bg-white hover:bg-mizan-fond text-mizan-ardoise font-medium text-sm
+    rounded-md px-3.5 py-2 border border-mizan-gris/30 transition-colors;
 }
 
 .input-field {
-  @apply w-full rounded-lg border border-mizan-gris/30 px-3 py-2 text-mizan-ardoise
+  @apply w-full rounded-md border border-mizan-gris/30 px-3 py-1.5 text-sm text-mizan-ardoise
     focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert;
 }
 
@@ -49,4 +49,15 @@ body {
 
 .empty-state {
   @apply rounded-card border border-dashed border-mizan-gris/30 bg-mizan-fond/60 p-6 text-center;
+}
+
+/* Densité analytique pour les tableaux existants — classes additives,
+   posées à côté des classes déjà présentes sur <tr>/<th> (jamais en
+   remplacement), pour ne jamais toucher aux colonnes/données rendues. */
+.th-bi {
+  @apply text-xs font-semibold uppercase tracking-wide bg-mizan-fond/70;
+}
+
+.row-bi:hover {
+  @apply bg-mizan-fond/50 transition-colors;
 }

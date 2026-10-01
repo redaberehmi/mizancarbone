@@ -13,7 +13,9 @@ const COLOR_VERT = '#0B6E4F';
 const COLOR_VERT_ATTENUE = '#8FC4AE'; // estimation / moins de confiance
 const COLOR_ARDOISE = '#33404A';
 const COLOR_GRIS = '#5B6670';
-const COLOR_MENTHE = '#BFE3D6';
+// Aligné sur le token Tailwind mizan-menthe (tailwind.config.js) — refonte
+// visuelle : ligne de grille neutre plutôt qu'aplat menthe franc.
+const COLOR_MENTHE = '#E1E4E6';
 
 function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
@@ -27,12 +29,15 @@ function formatPct(value, digits = 1) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: digits });
 }
 
-function ChartCard({ title, children, note }) {
+// Titre de visualisation sobre (semi-gras, taille modeste, sans la police
+// display) — cohérent avec un outil analytique plutôt qu'une page vitrine ;
+// le contenu du titre (prop `title`) n'est jamais modifié, seul son style l'est.
+function ChartCard({ title, children, note, className = '' }) {
   return (
-    <div className="card">
-      <h2 className="font-display font-bold text-mizan-ardoise mb-4">{title}</h2>
+    <div className={`card ${className}`}>
+      <h2 className="text-sm font-semibold text-mizan-ardoise mb-3">{title}</h2>
       {children}
-      {note && <p className="text-xs text-mizan-gris mt-2">{note}</p>}
+      {note && <p className="text-xs text-mizan-gris mt-2 leading-relaxed">{note}</p>}
     </div>
   );
 }
@@ -47,19 +52,22 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
+// Tuile KPI compacte (charte Power BI, section 5 de la demande) : libellé en
+// majuscules discret au-dessus d'une valeur mise en avant — mêmes props,
+// même contenu, présentation plus dense qu'une carte pleine hauteur.
 function StatTile({ label, value, unit, sub, unavailable }) {
   return (
-    <div className="card">
-      <p className="label-field">{label}</p>
+    <div className="card !p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-mizan-gris">{label}</p>
       {unavailable ? (
-        <p className="text-sm text-mizan-gris mt-1">{unavailable}</p>
+        <p className="text-sm text-mizan-gris mt-2">{unavailable}</p>
       ) : (
-        <>
-          <p className="font-data text-2xl text-mizan-ardoise">{value}</p>
-          {unit && <p className="text-xs text-mizan-gris">{unit}</p>}
-        </>
+        <p className="mt-1.5 flex items-baseline gap-1.5">
+          <span className="font-data text-2xl font-semibold text-mizan-ardoise leading-none">{value}</span>
+          {unit && <span className="text-xs text-mizan-gris">{unit}</span>}
+        </p>
       )}
-      {sub && <p className="text-xs text-mizan-gris mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-mizan-gris mt-1.5">{sub}</p>}
     </div>
   );
 }
@@ -187,24 +195,24 @@ export function Dashboard() {
   const { yearlyComparison, carbonIntensity, taxSimulation, topContributors, quality, completeness, alerts } = analytics;
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <div className="space-y-5">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Tableau de bord</h1>
-          <p className="text-mizan-gris text-sm mt-1">
+          <h1 className="font-display font-bold text-xl text-mizan-ardoise">Tableau de bord</h1>
+          <p className="text-mizan-gris text-sm mt-0.5">
             Vue d'ensemble de vos émissions, structurée selon le GHG Protocol / ISO 14064-1.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <a href="/api/reports/export.csv" className="btn-secondary">Données brutes (CSV)</a>
           <a href="/api/reports/export.pdf" className="btn-secondary">Rapport complet (PDF)</a>
         </div>
       </div>
 
       {alerts.length > 0 && (
-        <div className="rounded-lg border border-mizan-alerte/30 bg-mizan-alerte/5 p-4">
-          <h2 className="font-display font-bold text-mizan-alerte mb-2">Points d'attention</h2>
-          <ul className="space-y-1.5">
+        <div className="rounded-md border border-mizan-alerte/30 bg-mizan-alerte/5 px-4 py-3">
+          <h2 className="text-sm font-semibold text-mizan-alerte mb-1.5">Points d'attention</h2>
+          <ul className="space-y-1">
             {alerts.map((a, i) => (
               <li key={i} className="text-sm text-mizan-alerte flex items-start gap-2">
                 <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-mizan-alerte shrink-0" />
@@ -215,7 +223,7 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="grid sm:grid-cols-4 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatTile
           label="Émissions totales (Scope 1+2, cumulé)"
           value={formatTco2e(totalCalculated)}
@@ -255,11 +263,12 @@ export function Dashboard() {
         />
       </div>
 
+      <div className="grid lg:grid-cols-2 gap-4">
       <ChartCard
         title="Répartition par scope"
         note="Scope 3 (teinte atténuée) est une estimation spend-based — incertitude 30–80%, jamais présentée avec le même niveau de confiance que le Scope 1/2, calculés à partir de données d'activité physiques. Le Scope 2 market-based reste identique au location-based tant qu'aucun contrat d'électricité spécifique n'est renseigné."
       >
-        <div style={{ width: '100%', height: 260 }}>
+        <div style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={scopeData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
               <CartesianGrid vertical={false} stroke={COLOR_MENTHE} />
@@ -287,7 +296,7 @@ export function Dashboard() {
             description="Ce graphique s'alimentera automatiquement dès qu'au moins une entrée d'activité aura été calculée pour un site (module Collecte de données)."
           />
         ) : (
-          <div style={{ width: '100%', height: 260 }}>
+          <div style={{ width: '100%', height: 220 }}>
             <ResponsiveContainer>
               <BarChart data={siteData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                 <CartesianGrid vertical={false} stroke={COLOR_MENTHE} />
@@ -300,7 +309,9 @@ export function Dashboard() {
           </div>
         )}
       </ChartCard>
+      </div>
 
+      <div className="grid lg:grid-cols-2 gap-4">
       <ChartCard title="Top 5 postes d'émission" note="Tous sites et scopes confondus — pour identifier où agir en premier.">
         {topContributors.length === 0 ? (
           <EmptyState
@@ -325,6 +336,7 @@ export function Dashboard() {
           </div>
         )}
       </ChartCard>
+      </div>
 
       <ChartCard title="Qualité méthodologique">
         <div className="grid sm:grid-cols-3 gap-6">
