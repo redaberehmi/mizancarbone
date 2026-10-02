@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client.js';
+import { PageHeader } from '../components/PageHeader.jsx';
+import { SectionHeader } from '../components/SectionHeader.jsx';
+import { IconInput } from '../components/FormField.jsx';
+import { IconCalculator, IconMapPin, IconCalendar, IconFileCheck, IconCoins, IconTrendingUp } from '../components/icons.jsx';
 
 function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
@@ -71,18 +75,17 @@ export function CalculationResults() {
   if (loading) return null;
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Calcul des émissions</h1>
-          <p className="text-mizan-gris text-sm mt-1">
-            Périmètre organisationnel : contrôle opérationnel. Structuré selon le GHG Protocol.
-          </p>
-        </div>
-        <button onClick={handleRun} disabled={running} className="btn-secondary">
-          {running ? 'Calcul…' : 'Recalculer Scope 1 & 2'}
-        </button>
-      </div>
+    <div className="space-y-6 max-w-5xl">
+      <PageHeader
+        icon={IconCalculator}
+        title="Calcul des émissions"
+        subtitle="Périmètre organisationnel : contrôle opérationnel. Structuré selon le GHG Protocol."
+        actions={
+          <button onClick={handleRun} disabled={running} className="btn-secondary">
+            {running ? 'Calcul…' : 'Recalculer Scope 1 & 2'}
+          </button>
+        }
+      />
 
       {runResult && (
         <p className="text-sm text-mizan-vert">
@@ -130,7 +133,7 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-4">Répartition par site</h2>
+        <SectionHeader icon={IconMapPin} title="Répartition par site" />
         {summary.bySite.length === 0 ? (
           <p className="text-sm text-mizan-gris">Aucun résultat calculé pour le moment.</p>
         ) : (
@@ -154,7 +157,7 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-4">Répartition par période</h2>
+        <SectionHeader icon={IconCalendar} title="Répartition par période" />
         {summary.byPeriod.length === 0 ? (
           <p className="text-sm text-mizan-gris">Aucun résultat calculé pour le moment.</p>
         ) : (
@@ -178,8 +181,8 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-1">Répartition par produit</h2>
-        <p className="text-sm text-mizan-gris mb-4">
+        <SectionHeader icon={IconFileCheck} title="Répartition par produit" />
+        <p className="text-sm text-mizan-gris mb-4 -mt-2">
           Alimentée par la répartition produit du Module 4 (préparation CBAM) — tant qu'aucune allocation
           n'est renseignée, tout retombe dans « Non alloué ».
         </p>
@@ -206,8 +209,8 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-1">Estimation Scope 3 — secteur {readiness.sector}</h2>
-        <p className="text-sm text-mizan-gris mb-4">
+        <SectionHeader icon={IconTrendingUp} title={`Estimation Scope 3 — secteur ${readiness.sector}`} />
+        <p className="text-sm text-mizan-gris mb-4 -mt-2">
           Chiffre d'affaires ou valeur des achats × ratio sectoriel (ADEME Base Empreinte, kgCO2e/k€) —
           approche spend-based du GHG Protocol. Estimation globale, pas un calcul ligne par ligne.
         </p>
@@ -234,22 +237,24 @@ export function CalculationResults() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label-field">Début de période</label>
-              <input
+              <IconInput
+                icon={IconCalendar}
                 type="date"
                 required
                 disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-                className="input-field font-data"
+                className="font-data"
                 value={form.periodStart}
                 onChange={(e) => setForm({ ...form, periodStart: e.target.value })}
               />
             </div>
             <div>
               <label className="label-field">Fin de période</label>
-              <input
+              <IconInput
+                icon={IconCalendar}
                 type="date"
                 required
                 disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-                className="input-field font-data"
+                className="font-data"
                 value={form.periodEnd}
                 onChange={(e) => setForm({ ...form, periodEnd: e.target.value })}
               />
@@ -257,13 +262,14 @@ export function CalculationResults() {
           </div>
           <div>
             <label className="label-field">Chiffre d'affaires ou valeur des achats (MAD)</label>
-            <input
+            <IconInput
+              icon={IconCoins}
               type="number"
               step="any"
               min="0"
               required
               disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-              className="input-field font-data"
+              className="font-data"
               value={form.amountMad}
               onChange={(e) => setForm({ ...form, amountMad: e.target.value })}
             />
@@ -294,7 +300,7 @@ export function CalculationResults() {
 
       {estimates.length > 0 && (
         <div className="card">
-          <h2 className="font-display font-bold text-mizan-ardoise mb-4">Estimations Scope 3 précédentes</h2>
+          <SectionHeader icon={IconTrendingUp} title="Estimations Scope 3 précédentes" />
           <table className="w-full text-sm">
             <thead>
               <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { api } from '../api/client.js';
 import { EmptyState } from '../components/EmptyState.jsx';
+import { PageHeader } from '../components/PageHeader.jsx';
+import { IconHome } from '../components/icons.jsx';
 
 // Tons de la charte graphique (section 3). L'identité Scope 1 / Scope 2 /
 // Scope 3 est portée par les libellés d'axe, pas par la couleur : deux verts
@@ -196,18 +198,18 @@ export function Dashboard() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="font-display font-bold text-xl text-mizan-ardoise">Tableau de bord</h1>
-          <p className="text-mizan-gris text-sm mt-0.5">
-            Vue d'ensemble de vos émissions, structurée selon le GHG Protocol / ISO 14064-1.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <a href="/api/reports/export.csv" className="btn-secondary">Données brutes (CSV)</a>
-          <a href="/api/reports/export.pdf" className="btn-secondary">Rapport complet (PDF)</a>
-        </div>
-      </div>
+      <PageHeader
+        icon={IconHome}
+        title="Tableau de bord"
+        subtitle="Vue d'ensemble de vos émissions, structurée selon le GHG Protocol / ISO 14064-1."
+        banner={false}
+        actions={
+          <>
+            <a href="/api/reports/export.csv" className="btn-secondary">Données brutes (CSV)</a>
+            <a href="/api/reports/export.pdf" className="btn-secondary">Rapport complet (PDF)</a>
+          </>
+        }
+      />
 
       {alerts.length > 0 && (
         <div className="rounded-md border border-mizan-alerte/30 bg-mizan-alerte/5 px-4 py-3">

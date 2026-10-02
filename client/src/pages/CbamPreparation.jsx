@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
+import { PageHeader } from '../components/PageHeader.jsx';
+import { SectionHeader } from '../components/SectionHeader.jsx';
+import { IconFileCheck } from '../components/icons.jsx';
 
 function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
@@ -61,20 +64,18 @@ export function CbamPreparation() {
   if (loading) return null;
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <div className="space-y-6 max-w-5xl">
       <datalist id="cbam-products">
         {products.map((p) => (
           <option key={p} value={p} />
         ))}
       </datalist>
 
-      <div>
-        <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Préparation CBAM</h1>
-        <p className="text-mizan-gris text-sm mt-1">
-          Structuration de vos données par produit, réutilisable dans un questionnaire ou dossier destiné à
-          un client européen.
-        </p>
-      </div>
+      <PageHeader
+        icon={IconFileCheck}
+        title="Préparation CBAM"
+        subtitle="Structuration de vos données par produit, réutilisable dans un questionnaire ou dossier destiné à un client européen."
+      />
 
       {!relevance.isCoveredSector && (
         <div className="card border-mizan-alerte/30 bg-mizan-alerte/5">
@@ -91,8 +92,8 @@ export function CbamPreparation() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-1">Export</h2>
-        <p className="text-sm text-mizan-gris mb-4">
+        <SectionHeader icon={IconFileCheck} title="Export" />
+        <p className="text-sm text-mizan-gris mb-4 -mt-2">
           Fichiers de préparation de données, prêts à être transmis à votre client européen.
         </p>
         <div className="flex gap-3">

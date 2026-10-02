@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { EmptyState } from '../components/EmptyState.jsx';
+import { PageHeader } from '../components/PageHeader.jsx';
+import { SectionHeader } from '../components/SectionHeader.jsx';
+import { IconWallet, IconCalculator } from '../components/icons.jsx';
 
 function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
@@ -44,13 +47,12 @@ export function FinancingWatch() {
   const { programs, sizeCategoryCaveat } = eligibility;
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <div>
-        <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Financements & taxe carbone</h1>
-        <p className="text-mizan-gris text-sm mt-1">
-          Veille des dispositifs de financement et simulation indicative de la taxe carbone nationale.
-        </p>
-      </div>
+    <div className="space-y-6 max-w-5xl">
+      <PageHeader
+        icon={IconWallet}
+        title="Financements & taxe carbone"
+        subtitle="Veille des dispositifs de financement et simulation indicative de la taxe carbone nationale."
+      />
 
       <div className="rounded-lg border border-mizan-menthe bg-mizan-menthe/15 px-4 py-3">
         <p className="text-sm text-mizan-ardoise">
@@ -61,7 +63,7 @@ export function FinancingWatch() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-4">Dispositifs de financement</h2>
+        <SectionHeader icon={IconWallet} title="Dispositifs de financement" />
 
         {programs.length === 0 ? (
           <EmptyState
@@ -222,8 +224,8 @@ export function FinancingWatch() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-1">Simulateur — taxe carbone nationale</h2>
-        <p className="text-sm text-mizan-gris mb-4">
+        <SectionHeader icon={IconCalculator} title="Simulateur — taxe carbone nationale" />
+        <p className="text-sm text-mizan-gris mb-4 -mt-2">
           {simulation.available
             ? "Vos émissions sont calculées par scope ci-dessous ; le périmètre retenu pour la taxe est précisé dans l'encart en dessous."
             : "Le périmètre de scopes réellement soumis à la taxe n'est pas encore fixé par la Loi de Finances 2026 — vos émissions sont déjà calculées par scope ci-dessous, prêtes à être combinées dès que ce périmètre sera confirmé."}

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../api/client.js';
+import { PageHeader } from '../components/PageHeader.jsx';
+import { SectionHeader } from '../components/SectionHeader.jsx';
+import { IconInput, IconSelect } from '../components/FormField.jsx';
+import { IconDatabase, IconMapPin, IconCalendar, IconLeaf, IconFileCheck } from '../components/icons.jsx';
 
 const CATEGORY_LABELS = {
   combustion_fixe: 'Combustion fixe (chaudières, fours)',
@@ -139,23 +143,22 @@ export function DataCollection() {
   };
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <div>
-        <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Collecte de données</h1>
-        <p className="text-mizan-gris text-sm mt-1">
-          Saisie manuelle ou import CSV/Excel — organisée par site et par période.
-        </p>
-      </div>
+    <div className="space-y-6 max-w-5xl">
+      <PageHeader
+        icon={IconDatabase}
+        title="Collecte de données"
+        subtitle="Saisie manuelle ou import CSV/Excel — organisée par site et par période."
+      />
 
       <div className="grid md:grid-cols-2 gap-6">
         <form onSubmit={handleEnergySubmit} className="card space-y-3">
-          <h2 className="font-display font-bold text-mizan-ardoise">Électricité, carburant, gaz</h2>
+          <SectionHeader icon={IconDatabase} title="Électricité, carburant, gaz" />
 
           <div>
             <label className="label-field">Site</label>
-            <select
+            <IconSelect
+              icon={IconMapPin}
               required
-              className="input-field"
               value={energyForm.siteId}
               onChange={(e) => setEnergyForm({ ...energyForm, siteId: e.target.value })}
             >
@@ -163,25 +166,25 @@ export function DataCollection() {
               {sites.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
+            </IconSelect>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label-field">Début de période</label>
-              <input type="date" required className="input-field font-data" value={energyForm.periodStart} onChange={(e) => setEnergyForm({ ...energyForm, periodStart: e.target.value })} />
+              <IconInput icon={IconCalendar} type="date" required className="font-data" value={energyForm.periodStart} onChange={(e) => setEnergyForm({ ...energyForm, periodStart: e.target.value })} />
             </div>
             <div>
               <label className="label-field">Fin de période</label>
-              <input type="date" required className="input-field font-data" value={energyForm.periodEnd} onChange={(e) => setEnergyForm({ ...energyForm, periodEnd: e.target.value })} />
+              <IconInput icon={IconCalendar} type="date" required className="font-data" value={energyForm.periodEnd} onChange={(e) => setEnergyForm({ ...energyForm, periodEnd: e.target.value })} />
             </div>
           </div>
 
           <div>
             <label className="label-field">Type / facteur</label>
-            <select
+            <IconSelect
+              icon={IconDatabase}
               required
-              className="input-field"
               value={energyForm.factorCode}
               onChange={(e) => setEnergyForm({ ...energyForm, factorCode: e.target.value })}
             >
@@ -195,7 +198,7 @@ export function DataCollection() {
                   ))}
                 </optgroup>
               ))}
-            </select>
+            </IconSelect>
           </div>
 
           <div>
@@ -215,7 +218,7 @@ export function DataCollection() {
         </form>
 
         <form onSubmit={handleMaterialSubmit} className="card space-y-3">
-          <h2 className="font-display font-bold text-mizan-ardoise">Matières premières</h2>
+          <SectionHeader icon={IconLeaf} title="Matières premières" />
           <p className="text-xs text-mizan-gris -mt-2">
             Donnée de traçabilité (utile pour la préparation CBAM) — pas encore intégrée au calcul
             d'émissions, qui utilisera un ratio sectoriel global.
@@ -223,9 +226,9 @@ export function DataCollection() {
 
           <div>
             <label className="label-field">Site</label>
-            <select
+            <IconSelect
+              icon={IconMapPin}
               required
-              className="input-field"
               value={materialForm.siteId}
               onChange={(e) => setMaterialForm({ ...materialForm, siteId: e.target.value })}
             >
@@ -233,17 +236,17 @@ export function DataCollection() {
               {sites.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
-            </select>
+            </IconSelect>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label-field">Début de période</label>
-              <input type="date" required className="input-field font-data" value={materialForm.periodStart} onChange={(e) => setMaterialForm({ ...materialForm, periodStart: e.target.value })} />
+              <IconInput icon={IconCalendar} type="date" required className="font-data" value={materialForm.periodStart} onChange={(e) => setMaterialForm({ ...materialForm, periodStart: e.target.value })} />
             </div>
             <div>
               <label className="label-field">Fin de période</label>
-              <input type="date" required className="input-field font-data" value={materialForm.periodEnd} onChange={(e) => setMaterialForm({ ...materialForm, periodEnd: e.target.value })} />
+              <IconInput icon={IconCalendar} type="date" required className="font-data" value={materialForm.periodEnd} onChange={(e) => setMaterialForm({ ...materialForm, periodEnd: e.target.value })} />
             </div>
           </div>
 
@@ -274,7 +277,7 @@ export function DataCollection() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-1">Import CSV / Excel</h2>
+        <SectionHeader icon={IconFileCheck} title="Import CSV / Excel" />
         <p className="text-sm text-mizan-gris mb-4">
           Colonnes attendues : site, type (energie/matiere_premiere), code_facteur, description_matiere,
           fournisseur, periode_debut, periode_fin, quantite, document_source.{' '}
@@ -315,7 +318,7 @@ export function DataCollection() {
       </div>
 
       <div className="card">
-        <h2 className="font-display font-bold text-mizan-ardoise mb-4">Entrées enregistrées</h2>
+        <SectionHeader icon={IconDatabase} title="Entrées enregistrées" />
         {entries.length === 0 ? (
           <p className="text-sm text-mizan-gris">Aucune donnée saisie pour le moment.</p>
         ) : (
