@@ -14,7 +14,14 @@ services:
     runtime: node
     plan: free
     buildCommand: cd client && npm install && npm run build && cd ../server && npm install
-    startCommand: cd server && npm run migrate:up && npm run seed && npm start
+    # Migration + seed en pre-deploy (une seule fois par déploiement), jamais
+    # dans startCommand : le plan gratuit met le service en veille après 15
+    # min d'inactivité et relance le process à chaque requête de réveil — les
+    # remettre dans startCommand les aurait ré-exécutées à chaque réveil,
+    # ralentissant inutilement chaque reprise (migrate/seed restent
+    # idempotents, mais pas gratuits en temps de connexion DB).
+    preDeployCommand: cd server && npm run migrate:up && npm run seed
+    startCommand: cd server && npm start
     envVars:
       - key: NODE_ENV
         value: production
