@@ -13,11 +13,13 @@ services:
     name: mizancarbone
     runtime: node
     plan: free
-    # --include=dev : NODE_ENV=production (défini plus bas) s'applique aussi
-    # pendant le build, et ferait sauter les devDependencies (vite,
-    # @vitejs/plugin-react, tailwindcss...) sans quoi "vite build" échoue
-    # avec "vite: not found" — confirmé en déploiement réel sur Render.
-    buildCommand: cd client && npm install --include=dev && npm run build && cd ../server && npm install
+    # --include=dev (client ET server) : NODE_ENV=production (défini plus
+    # bas) s'applique aussi pendant le build, et ferait sauter les
+    # devDependencies — "vite" côté client (vite: not found au build) et
+    # "node-pg-migrate" côté serveur (node-pg-migrate: not found au
+    # démarrage, car startCommand lance migrate:up) — les deux confirmés en
+    # déploiement réel sur Render.
+    buildCommand: cd client && npm install --include=dev && npm run build && cd ../server && npm install --include=dev
     # preDeployCommand n'est pas supporté sur le plan gratuit (confirmé par
     # Render au moment du déploiement) — migrate/seed repassent dans
     # startCommand, comme à l'origine. Conséquence acceptée : ils se
