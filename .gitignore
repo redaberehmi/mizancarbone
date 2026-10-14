@@ -9,3 +9,10 @@ npm-debug.log*
 # jamais nécessaires en production (Neon/Render gèrent la base).
 server/.demo-db.mjs
 .tmp-test-pg-handoff.json
+
+# Fichiers sources tiers (ex. outil Bilan Carbone Maroc / FM6E) reçus pour
+# analyse mais dont le statut (brouillon/final) et les droits de réutilisation
+# commerciale ne sont pas confirmés — jamais commités tant que ce n'est pas
+# clarifié avec la source. Voir data/sources/README.md.
+data/sources/*
+!data/sources/README.md

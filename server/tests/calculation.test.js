@@ -83,6 +83,31 @@ describe('Calcul automatique Scope 1/2 à la création d\'une entrée', () => {
     expect(summary.body.scope2MarketBasedIsDefaulted).toBe(true);
   });
 
+  it('un contrat électricité spécifique (facteur de production) alimente le Scope 2 market-based indépendamment du location-based', async () => {
+    await agent.post('/api/activity-entries/energie').send({
+      siteId,
+      periodStart: '2024-01-01',
+      periodEnd: '2024-01-31',
+      factorCode: 'electricity_ma_location_based_kwh',
+      quantity: 1000,
+    });
+    await agent.post('/api/activity-entries/energie').send({
+      siteId,
+      periodStart: '2024-01-01',
+      periodEnd: '2024-01-31',
+      factorCode: 'electricity_production_eolien_kwh',
+      quantity: 500,
+    });
+
+    const summary = await agent.get('/api/calculations/summary');
+    // Location-based : uniquement les 1000 kWh réseau national (0.644 kg/kWh)
+    expect(summary.body.scope2LocationBasedTco2e).toBeCloseTo(0.644, 6);
+    // Market-based : uniquement les 500 kWh du contrat éolien (0.0127 kg/kWh),
+    // jamais additionné au location-based ni confondu avec lui.
+    expect(summary.body.scope2MarketBasedTco2e).toBeCloseTo((500 * 0.0127) / 1000, 6);
+    expect(summary.body.scope2MarketBasedIsDefaulted).toBe(false);
+  });
+
   it("n'attribue aucun résultat à une entrée matière première (jamais de facteur inventé)", async () => {
     await agent.post('/api/activity-entries/matieres-premieres').send({
       siteId,
