@@ -97,4 +97,21 @@ describe('GET /api/auth/me', () => {
     expect(res.status).toBe(200);
     expect(res.body.company.name).toBe(validPayload.companyName);
   });
+
+  it('reflète le chiffre d\'affaires / fréquence / catégorie de taille enregistrés via le profil (non-régression : ces champs étaient absents de la réponse /me alors que companies.service les enregistrait bien)', async () => {
+    const agent = request.agent(app);
+    await agent.post('/api/auth/register').send(validPayload);
+
+    await agent.put('/api/companies/me').send({
+      annualRevenueMad: 45000000,
+      reportingFrequency: 'trimestrielle',
+      declaredSizeCategory: 'pme',
+    });
+
+    const res = await agent.get('/api/auth/me');
+    expect(res.status).toBe(200);
+    expect(res.body.company.annualRevenueMad).toBe(45000000);
+    expect(res.body.company.reportingFrequency).toBe('trimestrielle');
+    expect(res.body.company.declaredSizeCategory).toBe('pme');
+  });
 });

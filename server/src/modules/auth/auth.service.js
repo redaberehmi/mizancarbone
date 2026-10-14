@@ -62,7 +62,8 @@ export async function authenticate({ email, password }) {
 export async function getUserWithCompany(userId, companyId) {
   const result = await pool.query(
     `SELECT u.id AS user_id, u.email, u.created_at AS user_created_at, u.last_login_at,
-            c.id AS company_id, c.name, c.sector, c.headcount, c.base_year, c.created_at AS company_created_at
+            c.id AS company_id, c.name, c.sector, c.headcount, c.base_year, c.created_at AS company_created_at,
+            c.annual_revenue_mad, c.reporting_frequency, c.declared_size_category
      FROM users u
      JOIN companies c ON c.id = u.company_id
      WHERE u.id = $1 AND u.company_id = $2`,

@@ -54,6 +54,9 @@ export async function me(req, res, next) {
         sector: data.sector,
         headcount: data.headcount,
         baseYear: data.base_year,
+        annualRevenueMad: data.annual_revenue_mad === null ? null : Number(data.annual_revenue_mad),
+        reportingFrequency: data.reporting_frequency,
+        declaredSizeCategory: data.declared_size_category,
       },
     });
   } catch (err) {
