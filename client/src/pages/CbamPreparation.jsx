@@ -96,7 +96,8 @@ export function CbamPreparation() {
         <p className="text-sm text-mizan-gris mb-4 -mt-2">
           Fichiers de préparation de données, prêts à être transmis à votre client européen.
         </p>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
+          <a href="/api/cbam-prep/export.xlsx" className="btn-secondary">Données de préparation CBAM (Excel)</a>
           <a href="/api/cbam-prep/export.csv" className="btn-secondary">Données de préparation CBAM (CSV)</a>
           <a href="/api/cbam-prep/export.pdf" className="btn-secondary">Données de préparation CBAM (PDF)</a>
         </div>

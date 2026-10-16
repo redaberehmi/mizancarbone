@@ -38,6 +38,17 @@ export async function exportCsv(req, res, next) {
   }
 }
 
+export async function exportXlsx(req, res, next) {
+  try {
+    const { filename, buffer } = await service.buildXlsxExport(req.auth.companyId);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function exportPdf(req, res, next) {
   try {
     const { filename, buffer } = await service.buildPdfExport(req.auth.companyId);

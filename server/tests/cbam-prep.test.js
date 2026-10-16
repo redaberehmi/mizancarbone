@@ -306,6 +306,51 @@ describe('GET /api/cbam-prep/export.csv', () => {
   });
 });
 
+describe('GET /api/cbam-prep/export.xlsx', () => {
+  it('produit un classeur structuré : mêmes lignes que le CSV, tCO2e vide (jamais 0) et statut explicite pour la matière première', async () => {
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+    await agent.post('/api/activity-entries/matieres-premieres').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', materialLabel: 'Ferraille', quantity: 12, supplier: 'Sonasid',
+    });
+
+    const res = await agent
+      .get('/api/cbam-prep/export.xlsx')
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks = [];
+        r.on('data', (c) => chunks.push(c));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/spreadsheetml/);
+
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(res.body);
+
+    expect(workbook.worksheets.map((s) => s.name)).toEqual([
+      'Informations', 'Synthèse par produit', 'Détail des lignes', 'Checklist', 'Sources des facteurs',
+    ]);
+
+    const detail = workbook.getWorksheet('Détail des lignes');
+    const headers = detail.getRow(1).values.slice(1);
+    const rows = [];
+    detail.eachRow((row, i) => {
+      if (i > 1) rows.push(Object.fromEntries(headers.map((h, idx) => [h, row.getCell(idx + 1).value])));
+    });
+    expect(rows).toHaveLength(2);
+
+    const diesel = rows.find((r) => r.Nature === 'Énergie');
+    expect(diesel.tCO2e).toBeCloseTo(0.268, 6);
+
+    const ferraille = rows.find((r) => r.Description === 'Ferraille');
+    expect(ferraille.tCO2e).toBeNull();
+    expect(ferraille.Statut).toBe('Non calculé');
+  });
+});
+
 describe('GET /api/cbam-prep/export.pdf', () => {
   it('renvoie une réponse PDF (statut, en-têtes, nom de fichier jamais "declaration")', async () => {
     await agent.post('/api/activity-entries/energie').send({

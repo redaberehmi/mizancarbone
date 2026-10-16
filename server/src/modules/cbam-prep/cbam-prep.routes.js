@@ -10,6 +10,7 @@ router.get('/relevance', controller.getRelevance);
 router.get('/products', controller.getProducts);
 router.get('/summary', controller.getSummary);
 router.get('/export.csv', controller.exportCsv);
+router.get('/export.xlsx', controller.exportXlsx);
 router.get('/export.pdf', controller.exportPdf);
 
 export default router;

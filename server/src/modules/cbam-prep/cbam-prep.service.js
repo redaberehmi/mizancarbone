@@ -215,6 +215,177 @@ export async function buildCsvExport(companyId) {
   return { filename: `donnees-preparation-cbam-${new Date().toISOString().slice(0, 10)}.csv`, content: lines.join('\n') };
 }
 
+const SECTOR_LABELS = {
+  automobile: 'Automobile',
+  textile: 'Textile',
+  agroalimentaire: 'Agroalimentaire',
+  metallurgie: 'Métallurgie',
+  fer_et_acier: 'Fer et acier',
+  aluminium: 'Aluminium',
+  ciment: 'Ciment',
+  engrais: 'Engrais',
+  electricite: 'Électricité',
+  hydrogene: 'Hydrogène',
+};
+
+const XLSX_HEADER_FILL ={ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4A3A' } };
+const XLSX_HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
+const XLSX_TCO2E_FORMAT = '#,##0.000';
+
+function addTableSheet(workbook, name, columns, rows) {
+  const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = columns.map(({ header, key, width }) => ({ header, key, width }));
+  const headerRow = sheet.getRow(1);
+  headerRow.font = XLSX_HEADER_FONT;
+  headerRow.fill = XLSX_HEADER_FILL;
+  headerRow.alignment = { vertical: 'middle', wrapText: true };
+  headerRow.height = 30;
+  rows.forEach((row) => sheet.addRow(row));
+  columns.forEach(({ key, numFmt }) => {
+    if (numFmt) sheet.getColumn(key).numFmt = numFmt;
+  });
+  sheet.eachRow((row, i) => {
+    if (i > 1) row.alignment = { vertical: 'top', wrapText: true };
+  });
+  if (rows.length > 0) {
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+  }
+  return sheet;
+}
+
+// Mêmes données que l'export CSV (getPreparationSummary), présentées pour
+// une lecture humaine : un onglet par usage, notes de cadrage en tête.
+// tCO2e reste numérique (vide si non calculé) et la colonne Statut porte le
+// libellé — une cellule vide n'est jamais lue comme un zéro.
+export async function buildXlsxExport(companyId) {
+  const ExcelJS = (await import('exceljs')).default;
+  const company = await getCompany(companyId);
+  const { groups, entries, checklist } = await getPreparationSummary(companyId);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'mizancarbone';
+  workbook.created = new Date();
+
+  const info = workbook.addWorksheet('Informations');
+  info.getColumn(1).width = 28;
+  info.getColumn(2).width = 110;
+  info.addRow(['Données de préparation CBAM']).font = { bold: true, size: 14, color: { argb: 'FF0B4A3A' } };
+  info.addRow([]);
+  [
+    ['Entreprise', company.name],
+    ['Secteur', SECTOR_LABELS[company.sector] ?? company.sector],
+    ['Date de génération', today],
+    ['Positionnement', CBAM_FRAMING_NOTE],
+    ['Ce que ce document n\'est pas', CBAM_NOT_OFFICIAL_NOTE],
+    ['Méthode', CBAM_METHODOLOGY_NOTE],
+    ['Statuts', 'Réel : calculé à partir de données saisies · Non calculé : donnée saisie sans résultat d\'émission (matière première, ou facteur indisponible pour la période) · À vérifier : ligne partiellement vérifiée.'],
+    ['Onglets', 'Synthèse par produit · Détail des lignes · Checklist · Sources des facteurs'],
+  ].forEach(([label, value]) => {
+    const row = info.addRow([label, value]);
+    row.getCell(1).font = { bold: true };
+    row.alignment = { vertical: 'top', wrapText: true };
+  });
+
+  addTableSheet(
+    workbook,
+    'Synthèse par produit',
+    [
+      { header: 'Produit', key: 'product', width: 32 },
+      { header: 'Lignes énergie', key: 'energieCount', width: 16 },
+      { header: 'tCO2e énergie (calculé)', key: 'energieTco2e', width: 22, numFmt: XLSX_TCO2E_FORMAT },
+      { header: 'Lignes énergie non calculées', key: 'nonCalcule', width: 24 },
+      { header: 'Lignes matière première (traçabilité)', key: 'matiereCount', width: 30 },
+    ],
+    groups.map((g) => ({
+      product: g.product ?? 'Non alloué',
+      energieCount: g.energieCount,
+      energieTco2e: g.energieTco2eTotal,
+      nonCalcule: g.entries.filter((e) => e.kind === 'energie' && e.tco2e === null).length,
+      matiereCount: g.matierePremiereCount,
+    })),
+  );
+
+  addTableSheet(
+    workbook,
+    'Détail des lignes',
+    [
+      { header: 'Produit', key: 'product', width: 24 },
+      { header: 'Site', key: 'site', width: 26 },
+      { header: 'Début de période', key: 'periodStart', width: 14 },
+      { header: 'Fin de période', key: 'periodEnd', width: 14 },
+      { header: 'Nature', key: 'nature', width: 22 },
+      { header: 'Description', key: 'description', width: 40 },
+      { header: 'Quantité', key: 'quantity', width: 14, numFmt: '#,##0.##' },
+      { header: 'Unité', key: 'unit', width: 9 },
+      { header: 'Fournisseur', key: 'supplier', width: 18 },
+      { header: 'tCO2e', key: 'tco2e', width: 12, numFmt: XLSX_TCO2E_FORMAT },
+      { header: 'Statut', key: 'status', width: 20 },
+      { header: 'Source du facteur', key: 'factorSource', width: 50 },
+      { header: 'Facteur national', key: 'isNational', width: 12 },
+      { header: 'Document source', key: 'sourceDocument', width: 20 },
+    ],
+    entries.map((e) => ({
+      product: e.product ?? 'Non alloué',
+      site: e.siteName ?? '',
+      periodStart: e.periodStart,
+      periodEnd: e.periodEnd,
+      nature: e.kind === 'energie' ? 'Énergie' : 'Matière première (traçabilité)',
+      description: e.description ?? '',
+      quantity: e.quantity,
+      unit: e.unit ?? '',
+      supplier: e.supplier ?? '',
+      tco2e: e.tco2e,
+      status: formatStatusLabel(e.status, { needsVerification: e.needsVerification }),
+      factorSource: e.factorSource ?? '',
+      isNational: e.isNational === null ? '' : e.isNational ? 'oui' : 'non (générique)',
+      sourceDocument: e.sourceDocument ?? '',
+    })),
+  );
+
+  const availability = (value) => (value === null ? 'Non applicable en V1' : value ? 'Disponible' : 'Manquant');
+  addTableSheet(
+    workbook,
+    'Checklist',
+    [
+      { header: 'Élément', key: 'item', width: 40 },
+      { header: 'État', key: 'state', width: 22 },
+      { header: 'Détail', key: 'detail', width: 80 },
+    ],
+    [
+      { item: 'Données énergie', state: availability(checklist.energieDisponible), detail: `${checklist.donneesManquantes.energieNonCalculeeCount} ligne(s) énergie non calculée(s)` },
+      { item: 'Données de production', state: availability(checklist.productionDisponible), detail: checklist.notDataCollected.join(' ') },
+      { item: 'Produits renseignés', state: availability(checklist.produitDisponible), detail: `${checklist.donneesManquantes.nonAlloueCount} ligne(s) non allouée(s) à un produit` },
+      { item: 'Matières premières tracées', state: availability(checklist.matierePremiereDisponible), detail: '' },
+      { item: 'Facteurs documentés', state: availability(checklist.facteursDocumentes), detail: 'Voir l\'onglet « Sources des facteurs »' },
+      { item: 'Éléments à vérifier', state: checklist.aVerifierCount === 0 ? 'Aucun' : `${checklist.aVerifierCount} à vérifier`, detail: '' },
+    ],
+  );
+
+  const factorSources = new Map();
+  for (const e of entries) {
+    if (e.kind !== 'energie' || !e.factorSource) continue;
+    const key = `${e.description}|${e.factorSource}`;
+    if (!factorSources.has(key)) {
+      factorSources.set(key, { description: e.description, unit: e.unit ?? '', source: e.factorSource, isNational: e.isNational ? 'oui' : 'non (générique)' });
+    }
+  }
+  addTableSheet(
+    workbook,
+    'Sources des facteurs',
+    [
+      { header: 'Facteur', key: 'description', width: 45 },
+      { header: 'Unité', key: 'unit', width: 9 },
+      { header: 'Source', key: 'source', width: 90 },
+      { header: 'Facteur national', key: 'isNational', width: 16 },
+    ],
+    [...factorSources.values()],
+  );
+
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  return { filename: `donnees-preparation-cbam-${today}.xlsx`, buffer };
+}
+
 function checklistRow(label, available, note) {
   if (available === null) {
     return `<tr><td>${escapeCell(label)}</td><td><span class="status-tag" data-status="manquant">Non applicable en V1</span></td><td>${escapeCell(note ?? '')}</td></tr>`;
