@@ -1,4 +1,5 @@
 node_modules/
+server/.cache/
 dist/
 .env
 .env.backup

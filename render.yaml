@@ -19,7 +19,11 @@ services:
     # "node-pg-migrate" côté serveur (node-pg-migrate: not found au
     # démarrage, car startCommand lance migrate:up) — les deux confirmés en
     # déploiement réel sur Render.
-    buildCommand: cd client && npm install --include=dev && npm run build && cd ../server && npm install --include=dev
+    # "npx puppeteer browsers install chrome" : installe Chrome (exports PDF)
+    # dans server/.cache/puppeteer (voir server/.puppeteerrc.cjs), de façon
+    # explicite — un npm install servi depuis le cache de build peut sauter
+    # le téléchargement automatique.
+    buildCommand: cd client && npm install --include=dev && npm run build && cd ../server && npm install --include=dev && npx puppeteer browsers install chrome
     # preDeployCommand n'est pas supporté sur le plan gratuit (confirmé par
     # Render au moment du déploiement) — migrate/seed repassent dans
     # startCommand, comme à l'origine. Conséquence acceptée : ils se
