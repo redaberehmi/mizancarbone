@@ -9,6 +9,20 @@ function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 }
 
+// Doit rester synchronisé avec SECTORS côté serveur (auth.validation.js).
+const SECTOR_LABELS = {
+  automobile: 'Automobile',
+  textile: 'Textile',
+  agroalimentaire: 'Agroalimentaire',
+  metallurgie: 'Métallurgie',
+  fer_et_acier: 'Fer et acier',
+  aluminium: 'Aluminium',
+  ciment: 'Ciment',
+  engrais: 'Engrais',
+  electricite: 'Électricité',
+  hydrogene: 'Hydrogène',
+};
+
 // Même vocabulaire que les rapports PDF (report-formatting.js) : un poste
 // sans donnée ou sans calcul n'affiche jamais « 0 ».
 function isNotCalculated(statusInfo) {
@@ -238,7 +252,7 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <SectionHeader icon={IconTrendingUp} title={`Estimation Scope 3 — secteur ${readiness.sector}`} />
+        <SectionHeader icon={IconTrendingUp} title={`Estimation Scope 3 — secteur ${SECTOR_LABELS[readiness.sector] ?? readiness.sector}`} />
         <p className="text-sm text-mizan-gris mb-4 -mt-2">
           Chiffre d'affaires ou valeur des achats × ratio sectoriel (ADEME Base Empreinte, kgCO2e/k€) —
           approche spend-based du GHG Protocol. Estimation globale, pas un calcul ligne par ligne.
