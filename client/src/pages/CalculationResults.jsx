@@ -9,6 +9,35 @@ function formatTco2e(value) {
   return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 }
 
+// Même vocabulaire que les rapports PDF (report-formatting.js) : un poste
+// sans donnée ou sans calcul n'affiche jamais « 0 ».
+function isNotCalculated(statusInfo) {
+  return statusInfo?.status === 'manquant' || statusInfo?.status === 'non_calcule';
+}
+
+function ScopeValue({ value, status, note, missingLabel, large }) {
+  if (isNotCalculated(status)) {
+    const label = status.status === 'non_calcule' ? 'Non calculé' : (missingLabel ?? 'Manquant');
+    return (
+      <>
+        <p className="font-data text-2xl text-mizan-gris">{label}</p>
+        <p className="text-xs text-mizan-gris">
+          {status.status === 'non_calcule' ? 'données saisies, aucun facteur applicable' : 'aucune donnée pour ce poste'}
+        </p>
+      </>
+    );
+  }
+  return (
+    <>
+      <p className="font-data text-2xl text-mizan-ardoise">
+        {formatTco2e(value)}
+        {large && <span className="text-base"> tCO2e</span>}
+      </p>
+      {!large && <p className="text-xs text-mizan-gris">tCO2e{note && ` — ${note}`}</p>}
+    </>
+  );
+}
+
 export function CalculationResults() {
   const [summary, setSummary] = useState(null);
   const [readiness, setReadiness] = useState(null);
@@ -98,35 +127,35 @@ export function CalculationResults() {
       <div className="grid sm:grid-cols-3 gap-4">
         <div className="card">
           <p className="label-field">Scope 1</p>
-          <p className="font-data text-2xl text-mizan-ardoise">{formatTco2e(summary.scope1Tco2e)}</p>
-          <p className="text-xs text-mizan-gris">tCO2e</p>
+          <ScopeValue value={summary.scope1Tco2e} status={summary.scope1Status} />
         </div>
         <div className="card">
           <p className="label-field">Scope 2 — location-based</p>
-          <p className="font-data text-2xl text-mizan-ardoise">{formatTco2e(summary.scope2LocationBasedTco2e)}</p>
-          <p className="text-xs text-mizan-gris">tCO2e</p>
+          <ScopeValue value={summary.scope2LocationBasedTco2e} status={summary.scope2LocationBasedStatus} />
         </div>
         <div className="card">
           <p className="label-field">Scope 2 — market-based</p>
-          <p className="font-data text-2xl text-mizan-ardoise">{formatTco2e(summary.scope2MarketBasedTco2e)}</p>
-          <p className="text-xs text-mizan-gris">
-            tCO2e{summary.scope2MarketBasedIsDefaulted && ' — identique au location-based (aucun contrat d\'énergie spécifique renseigné)'}
-          </p>
+          <ScopeValue
+            value={summary.scope2MarketBasedTco2e}
+            status={summary.scope2MarketBasedStatus}
+            note={summary.scope2MarketBasedIsDefaulted ? 'identique au location-based (aucun contrat d\'énergie spécifique renseigné)' : null}
+          />
         </div>
       </div>
 
       <div className="card border-mizan-alerte/30">
         <p className="label-field">Scope 3 — estimation (approche spend-based)</p>
-        <p className="font-data text-2xl text-mizan-ardoise">{formatTco2e(summary.scope3Tco2e)} <span className="text-base">tCO2e</span></p>
+        <ScopeValue value={summary.scope3Tco2e} status={summary.scope3Status} missingLabel="Non estimé" large />
         {summary.scope3Uncertainty && (
           <p className="text-sm text-mizan-alerte mt-1">
             Incertitude estimée : {summary.scope3Uncertainty.minPercent}–{summary.scope3Uncertainty.maxPercent}%.{' '}
             {summary.scope3Uncertainty.note}
           </p>
         )}
-        {summary.scope3Tco2e === 0 && (
+        {isNotCalculated(summary.scope3Status) && (
           <p className="text-sm text-mizan-gris mt-1">
-            Aucune estimation Scope 3 enregistrée. C'est une estimation, jamais présentée avec le même niveau de
+            Aucune estimation Scope 3 enregistrée : ce n'est pas un zéro, le Scope 3 n'est simplement pas encore
+            estimé. Une fois disponible, il restera présenté comme une estimation, jamais avec le même niveau de
             confiance que le Scope 1/2.
           </p>
         )}
