@@ -205,6 +205,7 @@ export function Dashboard() {
         banner={false}
         actions={
           <>
+            <a href="/api/reports/export.xlsx" className="btn-secondary">Rapport (Excel)</a>
             <a href="/api/reports/export.csv" className="btn-secondary">Données brutes (CSV)</a>
             <a href="/api/reports/export.pdf" className="btn-secondary">Rapport complet (PDF)</a>
           </>

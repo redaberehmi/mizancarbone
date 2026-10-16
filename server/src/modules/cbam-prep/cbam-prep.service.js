@@ -3,6 +3,7 @@ import { AppError } from '../../middleware/errorHandler.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from '../reports/pdf-template.js';
 import { formatStatusLabel, formatTco2e, formatTco2eCell, determineLineStatus } from '../reports/report-formatting.js';
 import { CBAM_COVERED_SECTORS, CBAM_OFFICIAL_CATEGORIES } from './constants.js';
+import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from '../reports/xlsx-helpers.js';
 
 // Phrase de cadrage réutilisée partout (UI, CSV, PDF) — jamais reformulée
 // au cas par cas, pour ne jamais risquer une dérive de vocabulaire (section
@@ -215,77 +216,26 @@ export async function buildCsvExport(companyId) {
   return { filename: `donnees-preparation-cbam-${new Date().toISOString().slice(0, 10)}.csv`, content: lines.join('\n') };
 }
 
-const SECTOR_LABELS = {
-  automobile: 'Automobile',
-  textile: 'Textile',
-  agroalimentaire: 'Agroalimentaire',
-  metallurgie: 'Métallurgie',
-  fer_et_acier: 'Fer et acier',
-  aluminium: 'Aluminium',
-  ciment: 'Ciment',
-  engrais: 'Engrais',
-  electricite: 'Électricité',
-  hydrogene: 'Hydrogène',
-};
-
-const XLSX_HEADER_FILL ={ type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4A3A' } };
-const XLSX_HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
-const XLSX_TCO2E_FORMAT = '#,##0.000';
-
-function addTableSheet(workbook, name, columns, rows) {
-  const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
-  sheet.columns = columns.map(({ header, key, width }) => ({ header, key, width }));
-  const headerRow = sheet.getRow(1);
-  headerRow.font = XLSX_HEADER_FONT;
-  headerRow.fill = XLSX_HEADER_FILL;
-  headerRow.alignment = { vertical: 'middle', wrapText: true };
-  headerRow.height = 30;
-  rows.forEach((row) => sheet.addRow(row));
-  columns.forEach(({ key, numFmt }) => {
-    if (numFmt) sheet.getColumn(key).numFmt = numFmt;
-  });
-  sheet.eachRow((row, i) => {
-    if (i > 1) row.alignment = { vertical: 'top', wrapText: true };
-  });
-  if (rows.length > 0) {
-    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
-  }
-  return sheet;
-}
-
 // Mêmes données que l'export CSV (getPreparationSummary), présentées pour
 // une lecture humaine : un onglet par usage, notes de cadrage en tête.
 // tCO2e reste numérique (vide si non calculé) et la colonne Statut porte le
 // libellé — une cellule vide n'est jamais lue comme un zéro.
 export async function buildXlsxExport(companyId) {
-  const ExcelJS = (await import('exceljs')).default;
   const company = await getCompany(companyId);
   const { groups, entries, checklist } = await getPreparationSummary(companyId);
   const today = new Date().toISOString().slice(0, 10);
 
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'mizancarbone';
-  workbook.created = new Date();
-
-  const info = workbook.addWorksheet('Informations');
-  info.getColumn(1).width = 28;
-  info.getColumn(2).width = 110;
-  info.addRow(['Données de préparation CBAM']).font = { bold: true, size: 14, color: { argb: 'FF0B4A3A' } };
-  info.addRow([]);
-  [
+  const workbook = await createWorkbook();
+  addInfoSheet(workbook, 'Données de préparation CBAM', [
     ['Entreprise', company.name],
-    ['Secteur', SECTOR_LABELS[company.sector] ?? company.sector],
+    ['Secteur', sectorLabel(company.sector)],
     ['Date de génération', today],
     ['Positionnement', CBAM_FRAMING_NOTE],
-    ['Ce que ce document n\'est pas', CBAM_NOT_OFFICIAL_NOTE],
+    ["Ce que ce document n'est pas", CBAM_NOT_OFFICIAL_NOTE],
     ['Méthode', CBAM_METHODOLOGY_NOTE],
-    ['Statuts', 'Réel : calculé à partir de données saisies · Non calculé : donnée saisie sans résultat d\'émission (matière première, ou facteur indisponible pour la période) · À vérifier : ligne partiellement vérifiée.'],
+    ['Statuts', "Réel : calculé à partir de données saisies · Non calculé : donnée saisie sans résultat d'émission (matière première, ou facteur indisponible pour la période) · À vérifier : ligne partiellement vérifiée."],
     ['Onglets', 'Synthèse par produit · Détail des lignes · Checklist · Sources des facteurs'],
-  ].forEach(([label, value]) => {
-    const row = info.addRow([label, value]);
-    row.getCell(1).font = { bold: true };
-    row.alignment = { vertical: 'top', wrapText: true };
-  });
+  ]);
 
   addTableSheet(
     workbook,
@@ -293,7 +243,7 @@ export async function buildXlsxExport(companyId) {
     [
       { header: 'Produit', key: 'product', width: 32 },
       { header: 'Lignes énergie', key: 'energieCount', width: 16 },
-      { header: 'tCO2e énergie (calculé)', key: 'energieTco2e', width: 22, numFmt: XLSX_TCO2E_FORMAT },
+      { header: 'tCO2e énergie (calculé)', key: 'energieTco2e', width: 22, numFmt: TCO2E_FORMAT },
       { header: 'Lignes énergie non calculées', key: 'nonCalcule', width: 24 },
       { header: 'Lignes matière première (traçabilité)', key: 'matiereCount', width: 30 },
     ],
@@ -319,7 +269,7 @@ export async function buildXlsxExport(companyId) {
       { header: 'Quantité', key: 'quantity', width: 14, numFmt: '#,##0.##' },
       { header: 'Unité', key: 'unit', width: 9 },
       { header: 'Fournisseur', key: 'supplier', width: 18 },
-      { header: 'tCO2e', key: 'tco2e', width: 12, numFmt: XLSX_TCO2E_FORMAT },
+      { header: 'tCO2e', key: 'tco2e', width: 12, numFmt: TCO2E_FORMAT },
       { header: 'Statut', key: 'status', width: 20 },
       { header: 'Source du facteur', key: 'factorSource', width: 50 },
       { header: 'Facteur national', key: 'isNational', width: 12 },
@@ -382,8 +332,7 @@ export async function buildXlsxExport(companyId) {
     [...factorSources.values()],
   );
 
-  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
-  return { filename: `donnees-preparation-cbam-${today}.xlsx`, buffer };
+  return { filename: `donnees-preparation-cbam-${today}.xlsx`, buffer: await workbookToBuffer(workbook) };
 }
 
 function checklistRow(label, available, note) {
@@ -442,7 +391,7 @@ export async function buildPreparationReportHtml(companyId) {
     <h2>Résumé exécutif</h2>
     <div class="kpi-grid">
       <div class="kpi-tile"><div class="kpi-label">Entreprise</div><div class="kpi-value">${escapeCell(company.name)}</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Secteur</div><div class="kpi-value">${escapeCell(company.sector)}</div></div>
+      <div class="kpi-tile"><div class="kpi-label">Secteur</div><div class="kpi-value">${escapeCell(sectorLabel(company.sector))}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Période couverte</div><div class="kpi-value mono">${escapeCell(periodLabel)}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Produits identifiés</div><div class="kpi-value mono">${products.length > 0 ? escapeCell(products.join(', ')) : 'Non renseigné'}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Lignes énergie</div><div class="kpi-value mono">${energieCount}</div></div>

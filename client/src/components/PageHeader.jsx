@@ -23,7 +23,7 @@ export function PageHeader({ icon: Icon, title, subtitle, banner = true, actions
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h1 className="font-display font-bold text-2xl text-mizan-ardoise">{title}</h1>
-            {actions && <div className="flex gap-2">{actions}</div>}
+            {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
           </div>
           {subtitle && <p className="text-mizan-gris text-sm mt-1 max-w-xl">{subtitle}</p>}
         </div>

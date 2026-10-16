@@ -7,6 +7,7 @@ const router = Router();
 router.use(authGuard);
 
 router.get('/export.csv', controller.exportCsv);
+router.get('/export.xlsx', controller.exportXlsx);
 router.get('/export.pdf', controller.exportPdf);
 router.get('/dashboard-analytics', controller.getDashboardAnalyticsRoute);
 

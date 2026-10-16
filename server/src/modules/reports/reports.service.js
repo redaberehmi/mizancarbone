@@ -2,7 +2,8 @@ import { pool } from '../../config/db.js';
 import { getEmissionsSummary } from '../calculation/calculation.service.js';
 import { getDataCompleteness } from './dashboard-analytics.service.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from './pdf-template.js';
-import { STATUS_LABELS, formatStatusLabel, formatTco2e } from './report-formatting.js';
+import { STATUS_LABELS, formatStatusLabel, formatTco2e, determineLineStatus } from './report-formatting.js';
+import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from './xlsx-helpers.js';
 
 async function getCompany(companyId) {
   const result = await pool.query(
@@ -215,7 +216,7 @@ export async function buildReportHtml(companyId) {
     <h2>Résumé exécutif</h2>
     <div class="kpi-grid">
       <div class="kpi-tile"><div class="kpi-label">Entreprise</div><div class="kpi-value">${escapeCell(company?.name ?? '—')}</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Secteur</div><div class="kpi-value">${escapeCell(company?.sector ?? '—')}</div></div>
+      <div class="kpi-tile"><div class="kpi-label">Secteur</div><div class="kpi-value">${escapeCell(sectorLabel(company?.sector) ?? '—')}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Période couverte</div><div class="kpi-value mono">${escapeCell(periodLabel)}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Année de référence</div><div class="kpi-value mono">${company?.base_year ?? 'Non renseignée'}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Nombre de sites</div><div class="kpi-value mono">${siteCount}</div></div>
@@ -303,4 +304,183 @@ export async function buildDashboardPdfExport(companyId) {
   const html = await buildReportHtml(companyId);
   const buffer = await htmlToPdfBuffer(html);
   return { filename: `rapport-carbone-mizancarbone-${new Date().toISOString().slice(0, 10)}.pdf`, buffer };
+}
+
+const NATURE_LABELS = {
+  energie: 'Énergie',
+  matiere_premiere: 'Matière première (traçabilité)',
+  scope3_estimation: 'Estimation Scope 3',
+};
+
+// tCO2e numérique seulement quand le statut porte réellement une valeur ;
+// vide pour manquant / non calculé — une cellule vide n'est jamais un zéro.
+function scopeNumber(value, statusResult) {
+  return statusResult.status === 'manquant' || statusResult.status === 'non_calcule' ? null : value;
+}
+
+function scopeStatusLabel(statusResult) {
+  return formatStatusLabel(statusResult.status, {
+    needsVerification: statusResult.needsVerification,
+    incomplete: statusResult.hasUncalculatedEntries && statusResult.status !== 'non_calcule',
+  });
+}
+
+// Même contenu que le rapport PDF et l'export CSV du tableau de bord,
+// organisé en onglets pour une lecture et une analyse dans Excel.
+export async function buildDashboardXlsxExport(companyId) {
+  const [company, summary, factorsUsed, siteCount, periodRange, rows] = await Promise.all([
+    getCompany(companyId),
+    getEmissionsSummary(companyId),
+    getFactorsUsedByCompany(companyId),
+    getSiteCount(companyId),
+    getReportingPeriodRange(companyId),
+    getAllEntriesWithResults(companyId),
+  ]);
+  const completeness = await getDataCompleteness(companyId, company?.reporting_frequency ?? null);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const workbook = await createWorkbook();
+  addInfoSheet(workbook, 'Rapport carbone — données', [
+    ['Entreprise', company?.name ?? '—'],
+    ['Secteur', sectorLabel(company?.sector) ?? '—'],
+    ['Période couverte', periodRange.entryCount > 0 ? `du ${periodRange.minStart} au ${periodRange.maxEnd}` : 'Aucune donnée saisie à ce jour'],
+    ['Année de référence', company?.base_year ?? 'Non renseignée'],
+    ['Nombre de sites', siteCount],
+    ['Taux de données disponibles', completenessLabel(completeness)],
+    ['Date de génération', today],
+    ['Périmètre', 'Contrôle opérationnel (100 % des émissions des sites contrôlés opérationnellement). Structuré selon le GHG Protocol / ISO 14064-1.'],
+    ['Méthode', 'Scope 1/2 : quantité × facteur d\'émission versionné, choisi selon la période exacte de chaque donnée. Scope 3 : estimation globale spend-based (dépenses × ratio sectoriel), jamais ligne par ligne.'],
+    ['Statuts', 'Réel : calculé à partir de données saisies · Estimé : estimation Scope 3 · Non calculé : donnée saisie sans facteur applicable · Manquant : aucune donnée · À vérifier : ligne partiellement vérifiée. Une cellule tCO2e vide n\'est jamais un zéro.'],
+    ['Statut du document', 'Outil de préparation interne — ne constitue pas une vérification tierce accréditée (ISO 14065).'],
+  ]);
+
+  const scope12Statuses = [summary.scope1Status, summary.scope2LocationBasedStatus];
+  const isPartial = (statuses) => statuses.some((s) => s.status === 'manquant' || s.status === 'non_calcule' || s.hasUncalculatedEntries);
+  const total12 = summary.scope1Tco2e + summary.scope2LocationBasedTco2e;
+  const total123Partial = isPartial([...scope12Statuses, summary.scope3Status]);
+
+  addTableSheet(
+    workbook,
+    'Synthèse par scope',
+    [
+      { header: 'Poste', key: 'poste', width: 34 },
+      { header: 'tCO2e', key: 'tco2e', width: 14, numFmt: TCO2E_FORMAT },
+      { header: 'Statut', key: 'status', width: 30 },
+      { header: 'Remarque', key: 'note', width: 70 },
+    ],
+    [
+      { poste: 'Scope 1', tco2e: scopeNumber(summary.scope1Tco2e, summary.scope1Status), status: scopeStatusLabel(summary.scope1Status), note: '' },
+      { poste: 'Scope 2 — location-based', tco2e: scopeNumber(summary.scope2LocationBasedTco2e, summary.scope2LocationBasedStatus), status: scopeStatusLabel(summary.scope2LocationBasedStatus), note: '' },
+      { poste: 'Scope 2 — market-based', tco2e: scopeNumber(summary.scope2MarketBasedTco2e, summary.scope2MarketBasedStatus), status: scopeStatusLabel(summary.scope2MarketBasedStatus), note: summary.scope2MarketBasedIsDefaulted ? 'Identique au location-based (aucun contrat d\'énergie spécifique renseigné)' : '' },
+      { poste: 'Scope 3 — estimation', tco2e: scopeNumber(summary.scope3Tco2e, summary.scope3Status), status: scopeStatusLabel(summary.scope3Status), note: summary.scope3Uncertainty ? `Incertitude ${summary.scope3Uncertainty.minPercent}–${summary.scope3Uncertainty.maxPercent} %` : '' },
+      { poste: 'Total Scope 1 + 2 (location-based)', tco2e: isPartial(scope12Statuses) ? null : total12, status: isPartial(scope12Statuses) ? 'Partiel' : 'Réel', note: 'Indicateur affiché au tableau de bord' },
+      { poste: 'Total Scope 1 + 2 + 3', tco2e: total123Partial ? null : total12 + summary.scope3Tco2e, status: total123Partial ? 'Partiel' : 'Réel', note: total123Partial ? 'Au moins un poste n\'est pas intégralement calculé — voir les statuts ci-dessus' : '' },
+    ],
+  );
+
+  addTableSheet(
+    workbook,
+    'Par site',
+    [
+      { header: 'Site', key: 'site', width: 36 },
+      { header: 'tCO2e', key: 'tco2e', width: 14, numFmt: TCO2E_FORMAT },
+    ],
+    summary.bySite.map((s) => ({ site: s.siteName ?? 'Sans site', tco2e: s.totalTco2e })),
+  );
+
+  addTableSheet(
+    workbook,
+    'Par période',
+    [
+      { header: 'Début de période', key: 'start', width: 16 },
+      { header: 'Fin de période', key: 'end', width: 16 },
+      { header: 'tCO2e', key: 'tco2e', width: 14, numFmt: TCO2E_FORMAT },
+    ],
+    [...summary.byPeriod]
+      .sort((a, b) => String(a.periodStart).localeCompare(String(b.periodStart)))
+      .map((p) => ({ start: p.periodStart, end: p.periodEnd, tco2e: p.totalTco2e })),
+  );
+
+  addTableSheet(
+    workbook,
+    'Par produit',
+    [
+      { header: 'Produit', key: 'product', width: 36 },
+      { header: 'tCO2e', key: 'tco2e', width: 14, numFmt: TCO2E_FORMAT },
+    ],
+    summary.byProduct.map((p) => ({ product: p.productAllocation ?? 'Non alloué', tco2e: p.totalTco2e })),
+  );
+
+  addTableSheet(
+    workbook,
+    'Données brutes',
+    [
+      { header: 'Nature', key: 'nature', width: 22 },
+      { header: 'Site', key: 'site', width: 26 },
+      { header: 'Début de période', key: 'start', width: 14 },
+      { header: 'Fin de période', key: 'end', width: 14 },
+      { header: 'Description', key: 'description', width: 40 },
+      { header: 'Quantité', key: 'quantity', width: 14, numFmt: '#,##0.##' },
+      { header: 'Unité', key: 'unit', width: 9 },
+      { header: 'Fournisseur', key: 'supplier', width: 18 },
+      { header: 'Produit alloué', key: 'product', width: 22 },
+      { header: 'Scope', key: 'scope', width: 8 },
+      { header: 'tCO2e', key: 'tco2e', width: 12, numFmt: TCO2E_FORMAT },
+      { header: 'Statut', key: 'status', width: 20 },
+      { header: 'Source du facteur', key: 'factorSource', width: 50 },
+      { header: 'Facteur national', key: 'isNational', width: 14 },
+      { header: 'Document source', key: 'sourceDocument', width: 20 },
+    ],
+    rows.map((r) => {
+      const kind = classifyEntry(r);
+      const tco2e = r.tco2e === null ? null : Number(r.tco2e);
+      let status;
+      if (kind === 'scope3_estimation') {
+        status = tco2e === null ? STATUS_LABELS.non_calcule : STATUS_LABELS.estime;
+      } else {
+        const line = determineLineStatus({ isRawMaterial: kind === 'matiere_premiere', tco2e, verificationStatus: r.verification_status });
+        status = formatStatusLabel(line.status, { needsVerification: line.needsVerification });
+      }
+      return {
+        nature: NATURE_LABELS[kind],
+        site: r.site_name ?? '',
+        start: r.period_start,
+        end: r.period_end,
+        description: kind === 'matiere_premiere' ? r.material_label : (r.factor_label ?? r.factor_code),
+        quantity: Number(r.quantity),
+        unit: kind === 'matiere_premiere' ? '' : (r.factor_unit ?? ''),
+        supplier: r.supplier ?? '',
+        product: r.product_allocation ?? '',
+        scope: r.scope ?? '',
+        tco2e,
+        status,
+        factorSource: r.factor_source ?? '',
+        isNational: r.is_national === null ? '' : r.is_national ? 'oui' : 'non (générique)',
+        sourceDocument: r.source_document ?? '',
+      };
+    }),
+  );
+
+  addTableSheet(
+    workbook,
+    'Facteurs utilisés',
+    [
+      { header: 'Scope', key: 'scope', width: 8 },
+      { header: 'Facteur', key: 'label', width: 45 },
+      { header: 'Valeur (kgCO2e par unité)', key: 'value', width: 18, numFmt: '0.000000' },
+      { header: 'Unité', key: 'unit', width: 9 },
+      { header: 'Source', key: 'source', width: 90 },
+      { header: 'Facteur national', key: 'isNational', width: 16 },
+    ],
+    factorsUsed.map((f) => ({
+      scope: f.scope,
+      label: f.label,
+      value: Number(f.value_kgco2e),
+      unit: f.unit,
+      source: f.source,
+      isNational: f.is_national ? 'oui' : 'non (générique)',
+    })),
+  );
+
+  return { filename: `rapport-carbone-mizancarbone-${today}.xlsx`, buffer: await workbookToBuffer(workbook) };
 }

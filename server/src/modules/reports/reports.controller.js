@@ -1,4 +1,4 @@
-import { buildRawDataCsvExport, buildDashboardPdfExport } from './reports.service.js';
+import { buildRawDataCsvExport, buildDashboardPdfExport, buildDashboardXlsxExport } from './reports.service.js';
 import { getDashboardAnalytics } from './dashboard-analytics.service.js';
 
 export async function getDashboardAnalyticsRoute(req, res, next) {
@@ -16,6 +16,17 @@ export async function exportCsv(req, res, next) {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(content);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function exportXlsx(req, res, next) {
+  try {
+    const { filename, buffer } = await buildDashboardXlsxExport(req.auth.companyId);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

@@ -116,6 +116,62 @@ describe('GET /api/reports/export.csv', () => {
   });
 });
 
+describe('GET /api/reports/export.xlsx', () => {
+  async function loadWorkbook() {
+    const res = await agent
+      .get('/api/reports/export.xlsx')
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks = [];
+        r.on('data', (c) => chunks.push(c));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/spreadsheetml/);
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(res.body);
+    return workbook;
+  }
+
+  function sheetRows(sheet) {
+    const headers = sheet.getRow(1).values.slice(1);
+    const rows = [];
+    sheet.eachRow((row, i) => {
+      if (i > 1) rows.push(Object.fromEntries(headers.map((h, idx) => [h, row.getCell(idx + 1).value])));
+    });
+    return rows;
+  }
+
+  it('contient les mêmes totaux que le résumé, un libellé de secteur lisible, et une cellule vide (jamais 0) pour un Scope 3 manquant', async () => {
+    await agent.post('/api/activity-entries/energie').send({
+      siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', quantity: 100,
+    });
+
+    const workbook = await loadWorkbook();
+    expect(workbook.worksheets.map((s) => s.name)).toEqual([
+      'Informations', 'Synthèse par scope', 'Par site', 'Par période', 'Par produit', 'Données brutes', 'Facteurs utilisés',
+    ]);
+
+    const info = workbook.getWorksheet('Informations');
+    let sector = null;
+    info.eachRow((row) => { if (row.getCell(1).value === 'Secteur') sector = row.getCell(2).value; });
+    expect(sector).toBe('Métallurgie');
+
+    const synthese = sheetRows(workbook.getWorksheet('Synthèse par scope'));
+    const scope1 = synthese.find((r) => r.Poste === 'Scope 1');
+    expect(scope1.tCO2e).toBeCloseTo(0.268, 6);
+    const scope3 = synthese.find((r) => r.Poste === 'Scope 3 — estimation');
+    expect(scope3.tCO2e).toBeNull();
+    expect(scope3.Statut).toBe('Manquant');
+
+    const brutes = sheetRows(workbook.getWorksheet('Données brutes'));
+    expect(brutes).toHaveLength(1);
+    expect(brutes[0].Statut).toBe('Réel');
+    expect(brutes[0]['Facteur national']).toBe('non (générique)');
+  });
+});
+
 describe('GET /api/reports/export.pdf', () => {
   it('renvoie une réponse PDF valide (statut, en-têtes)', async () => {
     await agent.post('/api/activity-entries/energie').send({
