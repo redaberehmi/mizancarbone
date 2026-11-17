@@ -187,6 +187,19 @@ export async function htmlToPdfBuffer(html) {
   const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
   try {
     const page = await browser.newPage();
+    // Durcissement : le HTML du rapport contient des données saisies par
+    // l'utilisateur (noms de site, descriptions…). Même si tout est échappé
+    // en amont, on coupe toute exécution de script dans la page et toute
+    // requête sortante — le rapport n'a besoin que de son HTML et de ses
+    // polices en data URI. Empêche qu'une injection oubliée serve à faire
+    // interroger par le serveur une adresse interne ou externe (SSRF).
+    await page.setJavaScriptEnabled(false);
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const url = request.url();
+      if (url.startsWith('data:') || url === 'about:blank') request.continue();
+      else request.abort();
+    });
     // Les polices sont des data URI embarquées (aucune requête réseau), mais
     // leur parsing/application au rendu reste asynchrone côté navigateur —
     // on attend explicitement document.fonts.ready pour ne jamais imprimer

@@ -2,6 +2,7 @@ import { pool } from '../../config/db.js';
 import { getEmissionsSummary } from '../calculation/calculation.service.js';
 import { getDataCompleteness } from './dashboard-analytics.service.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from './pdf-template.js';
+import { csvEscape } from './csv-escape.js';
 import { STATUS_LABELS, formatStatusLabel, formatTco2e, determineLineStatus } from './report-formatting.js';
 import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from './xlsx-helpers.js';
 
@@ -65,11 +66,6 @@ function classifyEntry(row) {
   if (row.factor_code?.startsWith('scope3_ratio_')) return 'scope3_estimation';
   if (row.material_label !== null) return 'matiere_premiere';
   return 'energie';
-}
-
-function csvEscape(value) {
-  const str = String(value ?? '');
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
 export async function buildRawDataCsvExport(companyId) {

@@ -1,6 +1,7 @@
 import { pool } from '../../config/db.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from '../reports/pdf-template.js';
+import { csvEscape } from '../reports/csv-escape.js';
 import { formatStatusLabel, formatTco2e, formatTco2eCell, determineLineStatus } from '../reports/report-formatting.js';
 import { CBAM_COVERED_SECTORS, CBAM_OFFICIAL_CATEGORIES } from './constants.js';
 import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from '../reports/xlsx-helpers.js';
@@ -178,11 +179,6 @@ export async function getPreparationSummary(companyId) {
     entries,
     checklist: buildChecklist(entries, groupsArray),
   };
-}
-
-function csvEscape(value) {
-  const str = String(value ?? '');
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
 export async function buildCsvExport(companyId) {
@@ -424,14 +420,14 @@ export async function buildPreparationReportHtml(companyId) {
       const rows = g.entries
         .map((e) => `
           <tr>
-            <td>${e.siteName ?? '—'}</td>
-            <td class="mono">${e.periodStart} → ${e.periodEnd}</td>
+            <td>${escapeCell(e.siteName ?? '—')}</td>
+            <td class="mono">${escapeCell(e.periodStart)} → ${escapeCell(e.periodEnd)}</td>
             <td>${e.kind === 'energie' ? 'Énergie (calculé)' : 'Matière première (traçabilité)'}</td>
             <td>${escapeCell(e.description)}</td>
-            <td class="mono">${e.quantity}${e.unit ? ` ${e.unit}` : ''}</td>
+            <td class="mono">${escapeCell(e.quantity)}${e.unit ? ` ${escapeCell(e.unit)}` : ''}</td>
             <td>${escapeCell(e.factorSource ?? '—')}</td>
             <td class="mono">${formatTco2eCell(e.tco2e)}</td>
-            <td><span class="status-tag" data-status="${e.status}">${escapeCell(formatStatusLabel(e.status, { needsVerification: e.needsVerification }))}</span></td>
+            <td><span class="status-tag" data-status="${escapeCell(e.status)}">${escapeCell(formatStatusLabel(e.status, { needsVerification: e.needsVerification }))}</span></td>
           </tr>`)
         .join('');
       const isUnallocated = g.product === null;
