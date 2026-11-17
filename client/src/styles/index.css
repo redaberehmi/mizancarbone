@@ -2,62 +2,154 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-mizan-fond text-mizan-ardoise font-sans antialiased;
+@layer base {
+  body { @apply bg-mizan-fond text-mizan-ardoise font-sans antialiased; }
+  ::selection { background: #cce9dc; color: #164a39; }
+  :focus-visible { outline: 3px solid #238266; outline-offset: 3px; }
+  button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+  input, select, textarea { min-width: 0; }
+  input[type='file'] { max-width: 100%; }
+  input[type='file']::file-selector-button {
+    @apply mr-3 rounded-lg border-0 bg-mizan-vert/10 px-4 py-2.5 text-sm font-medium text-mizan-vert cursor-pointer;
+  }
 }
 
-/* Toute valeur numérique/traçable (facteurs d'émission, quantités, IDs) doit
-   utiliser IBM Plex Mono — choix de marque délibéré signalant la précision. */
-.font-data {
-  @apply font-mono;
+@layer components {
+  /* Les chiffres conservent la police de données de la marque. */
+  .font-data { @apply font-mono; font-variant-numeric: tabular-nums; }
+  .card { @apply bg-white rounded-card border border-mizan-menthe shadow-panel p-5 sm:p-6; }
+
+  .btn-primary, .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium leading-5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    min-height: 42px;
+  }
+  .btn-primary {
+    @apply bg-mizan-vert text-white hover:bg-mizan-vert-secondaire;
+    box-shadow: 0 2px 3px #0b6e4f14, inset 0 1px 0 #ffffff18;
+  }
+  .btn-secondary {
+    @apply bg-white text-mizan-ardoise border border-mizan-menthe hover:bg-mizan-fond hover:border-mizan-vert/30;
+    box-shadow: 0 1px 2px #173d2f05;
+  }
+  .input-field {
+    @apply w-full rounded-md border border-mizan-gris/30 bg-white px-3 py-2.5 text-sm text-mizan-ardoise transition-colors;
+    @apply hover:border-mizan-gris/50 focus:outline-none focus:ring-4 focus:ring-mizan-vert/10 focus:border-mizan-vert;
+    min-height: 44px;
+    box-shadow: 0 1px 2px #173d2f04;
+  }
+  .input-field:disabled { @apply bg-mizan-fond text-mizan-gris cursor-not-allowed; }
+  .label-field { @apply block text-sm font-medium text-mizan-ardoise mb-2; }
+  .badge-non-national {
+    @apply inline-flex items-center gap-1 text-xs text-mizan-alerte border border-mizan-alerte/30 bg-mizan-alerte/5 rounded-full px-2 py-0.5;
+  }
+  .badge-a-venir {
+    @apply inline-flex items-center gap-1 text-xs text-mizan-vert border border-mizan-vert/20 bg-mizan-vert/5 rounded-full px-2.5 py-1 font-medium;
+  }
+  .empty-state {
+    @apply rounded-lg border border-mizan-menthe bg-mizan-fond/60 px-6 py-8 text-center;
+  }
+  .th-bi { @apply text-xs font-semibold uppercase tracking-wide bg-mizan-fond; }
+  .row-bi { @apply transition-colors hover:bg-mizan-vert/[0.03]; }
+
+  .app-topbar { box-shadow: none; }
+  .app-main { max-width: 1600px; margin-inline: auto; }
+  .app-sidebar {
+    color: #34454d;
+    background: #fff;
+    border-right: 1px solid #e2e7e9;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #c9d3ce transparent;
+  }
+  .sidebar-nav { padding: 24px 12px; }
+  .sidebar-link {
+    position: relative;
+    padding: 12px 13px;
+    margin-bottom: 5px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    line-height: 1.45;
+    transition: color 160ms ease, background-color 160ms ease;
+  }
+  .sidebar-link-idle { color: #53636b; }
+  .sidebar-link-idle svg { color: #71817a; }
+  .sidebar-link-idle:hover { color: #153e32; background: #f5f7f6; }
+  .sidebar-link-active {
+    color: #0b6e4f;
+    background: #edf5f0;
+    border-color: #dcebe2;
+    box-shadow: none;
+  }
+  .sidebar-link-active::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 13px;
+    bottom: 13px;
+    width: 3px;
+    border-radius: 4px;
+    background: #0b6e4f;
+  }
+  .sidebar-link-active svg { color: #0b6e4f; }
+  .app-sidebar :focus-visible { outline-color: #238266; }
+  .sidebar-note { background: #f8faf9; border: 1px solid #e5ebe7; color: #66776e; }
+  .sidebar-note > svg { color: #0b6e4f12; }
+  .account-trigger { border: 1px solid transparent; }
+  .account-menu { box-shadow: 0 12px 40px #153e321c; }
+  .page-header { padding-bottom: 24px; border-bottom: 1px solid #e0e5e7; }
+  .page-header-icon { background: #fff; color: #0b6e4f; border: 1px solid #e0e5e7; }
+  .page-header-banner { border: 1px solid #d6e5da; filter: saturate(0.6); }
+  .page-actions .btn-secondary:last-child { color: #fff; background: #0b6e4f; border-color: #0b6e4f; }
+  .page-actions .btn-secondary:last-child:hover { background: #167a5a; }
+  .stat-tile { position: relative; min-height: 156px; }
+  .stats-grid .stat-tile:first-child { background: #153e32; border-color: #153e32; }
+  .stats-grid .stat-tile:first-child .text-mizan-gris { color: #c5d8ce; }
+  .stats-grid .stat-tile:first-child .text-mizan-ardoise { color: #fff; }
+  .stats-grid .stat-tile:first-child .font-data { font-size: 2.25rem; }
+  .company-page > .page-header { grid-column: 1 / -1; margin-bottom: 0; }
+  .company-page > .card:last-child { align-self: start; }
+  .company-page > .card:last-child form { flex-direction: column; align-items: stretch; }
+  .company-page > .card:last-child li { gap: 12px; align-items: start; }
+  .company-page > .card:last-child li > span { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
+  .company-page > .card:last-child li > button { flex-shrink: 0; }
+  .company-page .section-header { padding-bottom: 16px; border-bottom: 1px solid #edf0f1; }
+  @media (min-width: 1280px) {
+    .company-page > .card:last-child { position: sticky; top: 96px; }
+  }
+  .chart-card { min-width: 0; }
+  .chart-card > h2 { padding-bottom: 14px; border-bottom: 1px solid #edf1ed; }
+  .app-main table { border-collapse: separate; border-spacing: 0; }
+  .app-main th { @apply text-left; }
+  .app-main th, .app-main td { padding: 12px 14px; }
+  .app-main thead th { border-bottom: 1px solid #dfe7e1; background: #f6f8f9; }
+  .app-main tbody td { border-bottom: 1px solid #edf1ed; }
+  .app-main tbody tr:last-child td { border-bottom: 0; }
+  .app-main thead th:first-child { border-radius: 8px 0 0 0; }
+  .app-main thead th:last-child { border-radius: 0 8px 0 0; }
+
+  .auth-page { background: #f4f6f7; }
+  .auth-page > .pointer-events-none { display: none; }
+  .auth-card { box-shadow: 0 12px 40px #182c230a, 0 1px 4px #182c2304; }
+  .auth-visual { background: #153e32; }
+  .auth-visual > img { opacity: 0.4; }
+  .auth-visual > div:first-of-type { background: linear-gradient(150deg, #153e3280, #102f27f5); }
+  .auth-visual h2 { max-width: 340px; font-size: 30px; letter-spacing: -0.03em; }
+  .auth-visual li { padding-top: 20px; border-top: 1px solid #ffffff1a; }
+
+  @media (max-width: 639px) {
+    .app-topbar { padding-inline: 12px; }
+    .app-topbar .font-display { font-size: 1rem; }
+    .account-trigger { gap: 4px; padding-right: 4px; }
+    .account-trigger > svg { width: 12px; }
+    .page-header { padding-bottom: 20px; }
+    .page-header-icon { width: 38px; height: 38px; border-radius: 10px; }
+    .page-header h1 { overflow-wrap: anywhere; }
+    .page-actions { width: 100%; }
+    .page-actions > a { flex: 1 1 150px; }
+    .stat-tile { min-height: 125px; }
+  }
 }
 
-.card {
-  @apply bg-white rounded-card border border-mizan-menthe shadow-panel p-5;
-}
-
-.btn-primary {
-  @apply bg-mizan-vert hover:bg-mizan-vert-secondaire text-white font-medium text-sm
-    rounded-md px-3.5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
-}
-
-.btn-secondary {
-  @apply bg-white hover:bg-mizan-fond text-mizan-ardoise font-medium text-sm
-    rounded-md px-3.5 py-2 border border-mizan-gris/30 transition-colors;
-}
-
-.input-field {
-  @apply w-full rounded-md border border-mizan-gris/30 px-3 py-1.5 text-sm text-mizan-ardoise
-    focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert;
-}
-
-.label-field {
-  @apply block text-sm text-mizan-gris mb-1;
-}
-
-.badge-non-national {
-  @apply inline-flex items-center gap-1 text-xs text-mizan-alerte border border-mizan-alerte/40
-    bg-mizan-alerte/5 rounded-full px-2 py-0.5;
-}
-
-/* État neutre "contenu à venir" — jamais la couleur d'alerte, ce n'est pas un
-   avertissement : c'est un vide attendu, géré délibérément. */
-.badge-a-venir {
-  @apply inline-flex items-center gap-1 text-xs text-mizan-vert border border-mizan-vert/30
-    bg-mizan-menthe/40 rounded-full px-2 py-0.5 font-medium;
-}
-
-.empty-state {
-  @apply rounded-card border border-dashed border-mizan-gris/30 bg-mizan-fond/60 p-6 text-center;
-}
-
-/* Densité analytique pour les tableaux existants — classes additives,
-   posées à côté des classes déjà présentes sur <tr>/<th> (jamais en
-   remplacement), pour ne jamais toucher aux colonnes/données rendues. */
-.th-bi {
-  @apply text-xs font-semibold uppercase tracking-wide bg-mizan-fond/70;
-}
-
-.row-bi:hover {
-  @apply bg-mizan-fond/50 transition-colors;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }

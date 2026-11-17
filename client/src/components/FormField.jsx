@@ -8,8 +8,7 @@ export function IconInput({ icon: Icon, className = '', ...props }) {
     <div className="relative">
       {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mizan-gris pointer-events-none" />}
       <input
-        className={`w-full rounded-lg border border-mizan-gris/30 ${Icon ? 'pl-9' : 'pl-3'} pr-3 py-2 text-sm text-mizan-ardoise
-          focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert ${className}`}
+        className={`input-field ${Icon ? 'pl-9' : 'pl-3'} pr-3 ${className}`}
         {...props}
       />
     </div>
@@ -18,11 +17,10 @@ export function IconInput({ icon: Icon, className = '', ...props }) {
 
 export function IconSelect({ icon: Icon, className = '', children, ...props }) {
   return (
-    <div className="relative">
+    <div className={`relative ${className}`}>
       {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mizan-gris pointer-events-none" />}
       <select
-        className={`w-full appearance-none rounded-lg border border-mizan-gris/30 ${Icon ? 'pl-9' : 'pl-3'} pr-9 py-2 text-sm text-mizan-ardoise
-          focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert ${className}`}
+        className={`input-field appearance-none ${Icon ? 'pl-9' : 'pl-3'} pr-9 ${className}`}
         {...props}
       >
         {children}

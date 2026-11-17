@@ -36,8 +36,8 @@ function formatPct(value, digits = 1) {
 // le contenu du titre (prop `title`) n'est jamais modifié, seul son style l'est.
 function ChartCard({ title, children, note, className = '' }) {
   return (
-    <div className={`card ${className}`}>
-      <h2 className="text-sm font-semibold text-mizan-ardoise mb-3">{title}</h2>
+    <div className={`card chart-card ${className}`}>
+      <h2 className="font-display text-base font-semibold text-mizan-ardoise mb-5">{title}</h2>
       {children}
       {note && <p className="text-xs text-mizan-gris mt-2 leading-relaxed">{note}</p>}
     </div>
@@ -59,17 +59,17 @@ function ChartTooltip({ active, payload, label }) {
 // même contenu, présentation plus dense qu'une carte pleine hauteur.
 function StatTile({ label, value, unit, sub, unavailable }) {
   return (
-    <div className="card !p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-mizan-gris">{label}</p>
+    <div className="card stat-tile">
+      <p className="text-xs font-semibold uppercase tracking-wide leading-relaxed text-mizan-gris">{label}</p>
       {unavailable ? (
         <p className="text-sm text-mizan-gris mt-2">{unavailable}</p>
       ) : (
-        <p className="mt-1.5 flex items-baseline gap-1.5">
-          <span className="font-data text-2xl font-semibold text-mizan-ardoise leading-none">{value}</span>
+        <p className="mt-4 flex flex-wrap items-baseline gap-2">
+          <span className="font-data text-3xl font-semibold text-mizan-ardoise leading-none tracking-tight">{value}</span>
           {unit && <span className="text-xs text-mizan-gris">{unit}</span>}
         </p>
       )}
-      {sub && <p className="text-xs text-mizan-gris mt-1.5">{sub}</p>}
+      {sub && <p className="text-xs text-mizan-gris mt-3 leading-relaxed">{sub}</p>}
     </div>
   );
 }
@@ -226,7 +226,7 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="stats-grid grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatTile
           label="Émissions totales (Scope 1+2, cumulé)"
           value={formatTco2e(totalCalculated)}
@@ -314,7 +314,7 @@ export function Dashboard() {
       </ChartCard>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid gap-4">
       <ChartCard title="Top 5 postes d'émission" note="Tous sites et scopes confondus — pour identifier où agir en premier.">
         {topContributors.length === 0 ? (
           <EmptyState

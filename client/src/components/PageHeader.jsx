@@ -13,23 +13,23 @@ import industrialScene from '../assets/industrial-scene.jpg';
 // qu'il s'agit d'une vraie capture du produit.
 export function PageHeader({ icon: Icon, title, subtitle, banner = true, actions }) {
   return (
-    <div className="flex flex-col md:flex-row md:items-stretch gap-4 mb-6">
-      <div className="flex items-start gap-4 flex-1 min-w-0">
+    <div className="page-header flex flex-col xl:flex-row xl:items-center gap-5 mb-6">
+      <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
         {Icon && (
-          <span className="shrink-0 w-14 h-14 rounded-xl bg-mizan-vert text-white flex items-center justify-center shadow-panel">
-            <Icon className="w-7 h-7" />
+          <span className="page-header-icon shrink-0 w-11 h-11 rounded-lg flex items-center justify-center">
+            <Icon className="w-6 h-6" />
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <h1 className="font-display font-bold text-2xl text-mizan-ardoise">{title}</h1>
-            {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <h1 className="font-display font-semibold text-2xl sm:text-[28px] tracking-tight text-mizan-ardoise">{title}</h1>
+            {actions && <div className="page-actions flex flex-wrap gap-2">{actions}</div>}
           </div>
-          {subtitle && <p className="text-mizan-gris text-sm mt-1 max-w-xl">{subtitle}</p>}
+          {subtitle && <p className="text-mizan-gris text-sm leading-relaxed mt-2 max-w-2xl">{subtitle}</p>}
         </div>
       </div>
       {banner && (
-        <div className="relative hidden md:block w-72 shrink-0 h-24 rounded-2xl overflow-hidden">
+        <div className="page-header-banner relative hidden xl:block w-36 shrink-0 h-16 rounded-lg overflow-hidden">
           <img
             src={industrialScene}
             alt=""

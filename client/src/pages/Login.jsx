@@ -32,7 +32,7 @@ export function Login() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-mizan-fond flex flex-col items-center justify-center px-4 py-10">
+    <div className="auth-page relative min-h-screen overflow-hidden bg-mizan-fond flex flex-col items-center justify-center px-4 py-10">
       {/* Formes décoratives d'arrière-plan — teinte menthe dédiée (pas le
           token mizan-menthe, neutralisé par la refonte du tableau de bord),
           réservée à cette page d'accueil pour un accent plus chaleureux. */}
@@ -41,17 +41,17 @@ export function Login() {
       <div className="pointer-events-none absolute -bottom-32 -left-16 w-96 h-96 rounded-full bg-[#BFE3D6]/60 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-20 right-0 w-72 h-72 rounded-full bg-mizan-vert/15 blur-3xl" />
 
-      <div className="relative w-full max-w-4xl">
+      <div className="relative w-full max-w-5xl">
         <div className="flex flex-col items-center mb-8">
           <Logo badgeSize={48} />
           <p className="text-sm text-mizan-gris mt-2">Mesurez aujourd'hui · Décarbonez demain</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-panel border border-mizan-menthe overflow-hidden grid lg:grid-cols-2">
+        <div className="auth-card bg-white rounded-2xl border border-mizan-menthe overflow-hidden grid lg:grid-cols-2">
           {/* Colonne formulaire */}
-          <div className="p-8 sm:p-10">
+          <div className="p-6 sm:p-10 lg:p-12">
             <span className="block w-10 h-1 rounded-full bg-mizan-vert mb-4" />
-            <h1 className="font-display font-bold text-2xl text-mizan-ardoise">Connexion</h1>
+            <h1 className="font-display font-bold text-3xl tracking-tight text-mizan-ardoise">Connexion</h1>
             <p className="text-sm text-mizan-gris mt-1.5 mb-7">
               Accédez à votre espace et suivez votre empreinte carbone en toute simplicité.
             </p>
@@ -66,8 +66,7 @@ export function Login() {
                     type="email"
                     required
                     autoComplete="email"
-                    className="w-full rounded-lg border border-mizan-gris/30 pl-10 pr-3 py-2.5 text-sm text-mizan-ardoise
-                      focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert"
+                    className="input-field pl-10 pr-3"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
                   />
@@ -82,8 +81,7 @@ export function Login() {
                     type={showPassword ? 'text' : 'password'}
                     required
                     autoComplete="current-password"
-                    className="w-full rounded-lg border border-mizan-gris/30 pl-10 pr-10 py-2.5 text-sm text-mizan-ardoise
-                      focus:outline-none focus:ring-2 focus:ring-mizan-vert/40 focus:border-mizan-vert"
+                    className="input-field pl-10 pr-10"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                   />
@@ -103,8 +101,7 @@ export function Login() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 bg-mizan-vert hover:bg-mizan-vert-secondaire
-                  text-white font-medium text-sm rounded-lg py-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-primary w-full"
               >
                 {submitting ? 'Connexion…' : 'Se connecter'}
                 {!submitting && <IconArrowRight className="w-4 h-4" />}
@@ -134,7 +131,7 @@ export function Login() {
               d'écran avec des chiffres fictifs, volontairement exclue du
               cadrage pour ne jamais laisser croire à une vraie capture du
               produit (voir PageHeader.jsx pour la même précaution). */}
-          <div className="relative hidden lg:block text-white p-10 overflow-hidden">
+          <div className="auth-visual relative hidden lg:flex lg:items-center text-white p-12 overflow-hidden">
             <img
               src={industrialScene}
               alt=""

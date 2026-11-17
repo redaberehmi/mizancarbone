@@ -44,16 +44,16 @@ function companyInitials(name) {
 function SidebarContent({ navItems }) {
   return (
     <>
-      <nav className="flex-1 py-4 px-2.5 space-y-0.5 text-sm">
+      <nav className="sidebar-nav flex-1 text-sm">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
-              `flex items-center gap-2.5 px-3 py-2 rounded-md font-medium border-l-2 ${
+              `sidebar-link flex items-center gap-3 font-medium ${
                 isActive
-                  ? 'bg-mizan-vert/[0.06] border-mizan-vert text-mizan-vert'
-                  : 'border-transparent text-mizan-gris hover:bg-mizan-fond hover:text-mizan-ardoise'
+                  ? 'sidebar-link-active'
+                  : 'sidebar-link-idle'
               }`
             }
           >
@@ -62,9 +62,9 @@ function SidebarContent({ navItems }) {
           </NavLink>
         ))}
       </nav>
-      <div className="relative overflow-hidden p-4 m-2.5 mt-0 rounded-xl bg-mizan-vert/5 border border-mizan-vert/15">
-        <IconLeaf className="absolute -bottom-2 -left-2 w-14 h-14 text-mizan-vert/10" />
-        <p className="relative text-xs font-medium text-mizan-vert leading-snug">
+      <div className="sidebar-note relative overflow-hidden p-5 m-4 mt-0 rounded-xl">
+        <IconLeaf className="absolute -bottom-2 -right-2 w-16 h-16 text-white/10" />
+        <p className="relative text-xs font-medium leading-relaxed">
           Des données fiables pour un avenir durable.
         </p>
       </div>
@@ -90,10 +90,10 @@ export function Layout({ children }) {
   };
 
   return (
-    <div className="min-h-screen bg-mizan-fond">
+    <div className="app-shell min-h-screen bg-mizan-fond">
       {user && (
-        <header className="h-16 bg-white border-b border-mizan-menthe flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30">
-          <div className="flex items-center gap-3">
+        <header className="app-topbar h-16 bg-white border-b border-mizan-menthe flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               type="button"
               aria-label="Ouvrir la navigation"
@@ -106,7 +106,7 @@ export function Layout({ children }) {
               <Logo badgeSize={34} />
             </Link>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-4">
             <button
               type="button"
               aria-label="Notifications"
@@ -119,7 +119,7 @@ export function Layout({ children }) {
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                className="flex items-center gap-2.5 pl-1 pr-2 py-1 rounded-full hover:bg-mizan-fond"
+                className="account-trigger flex items-center gap-2.5 pl-1 pr-2 py-1 rounded-full hover:bg-mizan-fond"
               >
                 <span className="w-8 h-8 rounded-full bg-mizan-vert text-white text-xs font-semibold flex items-center justify-center shrink-0">
                   {companyInitials(company?.name)}
@@ -137,7 +137,7 @@ export function Layout({ children }) {
                     className="fixed inset-0 z-40 cursor-default"
                     onClick={() => setMenuOpen(false)}
                   />
-                  <div className="absolute right-0 top-full mt-2 w-60 bg-white rounded-xl border border-mizan-menthe shadow-panel z-50 p-1.5">
+                  <div className="account-menu absolute right-0 top-full mt-3 w-60 bg-white rounded-xl border border-mizan-menthe shadow-panel z-50 p-1.5">
                     <div className="px-3 py-2 border-b border-mizan-menthe mb-1">
                       <p className="text-sm font-medium text-mizan-ardoise truncate">{company?.name}</p>
                       <p className="text-xs text-mizan-gris font-data truncate">{user.email}</p>
@@ -161,7 +161,7 @@ export function Layout({ children }) {
         {user && (
           <>
             {/* Desktop : barre latérale fixe, toujours visible */}
-            <aside className="hidden lg:flex w-60 shrink-0 bg-white border-r border-mizan-menthe min-h-[calc(100vh-4rem)] flex-col">
+            <aside className="app-sidebar hidden lg:flex w-60 shrink-0 sticky top-16 h-[calc(100vh-4rem)] flex-col">
               <SidebarContent navItems={navItems} />
             </aside>
 
@@ -173,8 +173,8 @@ export function Layout({ children }) {
                   className="absolute inset-0 bg-mizan-ardoise/30"
                   onClick={() => setMobileNavOpen(false)}
                 />
-                <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white border-r border-mizan-menthe flex flex-col">
-                  <div className="h-16 flex items-center justify-between px-4 border-b border-mizan-menthe">
+                <aside className="app-sidebar absolute inset-y-0 left-0 w-72 max-w-[85vw] flex flex-col">
+                  <div className="h-16 shrink-0 bg-white flex items-center justify-between px-4 border-b border-mizan-menthe">
                     <Logo badgeSize={30} />
                     <button
                       aria-label="Fermer la navigation"
@@ -184,7 +184,7 @@ export function Layout({ children }) {
                       <IconX className="w-5 h-5" />
                     </button>
                   </div>
-                  <div className="flex-1 flex flex-col" onClick={() => setMobileNavOpen(false)}>
+                  <div className="flex-1 min-h-0 overflow-y-auto flex flex-col" onClick={() => setMobileNavOpen(false)}>
                     <SidebarContent navItems={navItems} />
                   </div>
                 </aside>
@@ -193,7 +193,7 @@ export function Layout({ children }) {
           </>
         )}
         <div className="flex-1 min-w-0">
-          <main className="px-4 sm:px-6 lg:px-8 py-6">{children}</main>
+          <main className="app-main px-4 sm:px-6 lg:px-9 py-6 sm:py-8">{children}</main>
         </div>
       </div>
     </div>

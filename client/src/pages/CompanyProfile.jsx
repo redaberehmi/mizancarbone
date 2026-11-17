@@ -122,7 +122,7 @@ export function CompanyProfile() {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="company-page grid xl:grid-cols-[minmax(0,1fr)_320px] gap-6">
       <PageHeader
         icon={IconBuilding}
         title="Profil entreprise"
@@ -295,7 +295,7 @@ export function CompanyProfile() {
           {sites.length === 0 && <li className="py-2 text-sm text-mizan-gris">Aucun site enregistré.</li>}
         </ul>
 
-        <form onSubmit={handleAddSite} className="flex gap-3 items-end">
+        <form onSubmit={handleAddSite} className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
           <div className="flex-1">
             <label className="label-field" htmlFor="siteName">Nom du site</label>
             <IconInput

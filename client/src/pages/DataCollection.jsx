@@ -169,7 +169,7 @@ export function DataCollection() {
             </IconSelect>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className="label-field">Début de période</label>
               <IconInput icon={IconCalendar} type="date" required className="font-data" value={energyForm.periodStart} onChange={(e) => setEnergyForm({ ...energyForm, periodStart: e.target.value })} />
@@ -239,7 +239,7 @@ export function DataCollection() {
             </IconSelect>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className="label-field">Début de période</label>
               <IconInput icon={IconCalendar} type="date" required className="font-data" value={materialForm.periodStart} onChange={(e) => setMaterialForm({ ...materialForm, periodStart: e.target.value })} />
@@ -255,7 +255,7 @@ export function DataCollection() {
             <input required className="input-field" value={materialForm.materialLabel} onChange={(e) => setMaterialForm({ ...materialForm, materialLabel: e.target.value })} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className="label-field">Quantité</label>
               <input type="number" step="any" min="0" required className="input-field font-data" value={materialForm.quantity} onChange={(e) => setMaterialForm({ ...materialForm, quantity: e.target.value })} />
@@ -285,7 +285,7 @@ export function DataCollection() {
             Télécharger le modèle
           </a>
         </p>
-        <form onSubmit={handleImport} className="flex items-center gap-3">
+        <form onSubmit={handleImport} className="flex flex-wrap items-center gap-3">
           <input
             type="file"
             accept=".csv,.xlsx"
