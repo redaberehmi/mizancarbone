@@ -16,15 +16,29 @@ la clarification ci-dessous n'est pas faite.
 - **Date du fichier** : draft du 15 octobre 2024 (date dans le nom du
   fichier lui-même).
 - **Date de réception** : 2026-10-09.
-- **Statut** : **brouillon non confirmé**. Le nom du fichier porte
-  explicitement la mention "draft", et les onglets de synthèse contiennent
-  des erreurs `#REF!` non corrigées. Aucune version finale identifiée à ce
-  jour.
+- **Statut** : version « draft » du 15/10/2024 (nom du fichier). Le
+  17/11/2026, l'experte carbone (contact FM6) a indiqué que c'est le fichier
+  actuellement utilisé et qu'il n'existe pas de version actualisée. Le nom et
+  la version exacts sont conservés : ce n'est pas une édition officiellement
+  publiée. Les onglets de synthèse contiennent des erreurs `#REF!` non
+  corrigées (sans effet sur les tableaux de facteurs repris).
 - **Droits de réutilisation commerciale** : **non confirmés**. Question
   posée directement à FM6E par l'utilisateur (en cours). Bloquant avant tout
   déploiement ou pilote client, pas bloquant pour un usage local de
   développement/test.
-- **Utilisation actuelle dans le code** : un seul facteur en a été extrait et
+- **Import reproductible (2026-11-18)** : `server/src/db/import/fm6e-import.js`
+  lit le classeur, classe chaque ligne (règles dans `fm6e-registry.js`) et
+  produit un rapport (`data/sources/fm6e-import-report.json`, exclu de git).
+  Mode aperçu par défaut ; `--apply` pour écrire dans la base pointée par
+  `DATABASE_URL`. Ne jamais l'appliquer à la base de production tant que les
+  droits ne sont pas confirmés. Résultat sur ce fichier : 306 facteurs
+  retenus, 47 écartés (dont 21 « combustion + amont » non décomposés,
+  inutilisables pour le Scope 1 ; 6 facteurs électriques de cycle de vie
+  non admissibles en market-based ; 7 de périmètre non indiqué ; 4 sans
+  source ; 2 « estimé » ; 2 paramétriques ; 5 hydrogène hors combustion).
+  Un réimport du même fichier ne crée aucun doublon et n'écrase jamais une
+  valeur existante.
+- **Utilisation historique dans le code** : un seul facteur en a été extrait et
   intégré à `server/src/db/seed/007_emission_factors_fm6_national.sql`
   (électricité réseau national Maroc, mix 2020, 0,6426 kgCO2e/kWh), marqué
   `is_national = false` tant que ce statut n'est pas clarifié — voir les

@@ -2,6 +2,36 @@ import { pool } from '../../config/db.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from '../reports/pdf-template.js';
 import { csvEscape } from '../reports/csv-escape.js';
+import { listProcesses } from './cbam-production.service.js';
+
+// Procédés CBAM (émissions intrinsèques) repris dans les trois exports, avec
+// leur statut et ce qui manque — jamais un chiffre pour un cas non pris en
+// charge ou incomplet.
+const PROCESS_STATUS_LABELS = {
+  calcule_valeurs_reelles: "Calculé (valeurs réelles de l'installation, bien simple)",
+  incomplet: 'Incomplet',
+  non_pris_en_charge: 'Non pris en charge',
+};
+
+export const CBAM_PROCESS_NOTE =
+  "Émissions intrinsèques par procédé : calculées uniquement pour les biens simples, à partir des seules données de l'installation rattachées au procédé (part attribuée documentée), divisées par la production du procédé. Aucune valeur par défaut n'est substituée. Ces valeurs doivent être vérifiées par un vérificateur accrédité.";
+
+function processRows(processes) {
+  return processes.map((p) => ({
+    installation: p.installationName,
+    process: p.name,
+    product: p.productName,
+    cnCode: p.cnCode,
+    period: `${p.periodStart} → ${p.periodEnd}`,
+    production: p.productionTonnes,
+    status: PROCESS_STATUS_LABELS[p.status],
+    direct: p.attributedDirectTco2e,
+    indirect: p.attributedIndirectTco2e,
+    seeDirect: p.specificDirectEmissions,
+    seeIndirect: p.specificIndirectEmissions,
+    gaps: [...p.unsupported, ...p.missing].join(' ; '),
+  }));
+}
 import { formatStatusLabel, formatTco2e, formatTco2eCell, determineLineStatus } from '../reports/report-formatting.js';
 import { CBAM_COVERED_SECTORS, CBAM_OFFICIAL_CATEGORIES } from './constants.js';
 import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from '../reports/xlsx-helpers.js';
@@ -13,9 +43,10 @@ import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuf
 // par l'entreprise dans ses échanges avec son client, il ne transmet rien
 // à une autorité ou un registre.
 export const CBAM_FRAMING_NOTE =
-  "Ce document rassemble des données de préparation carbone structurées selon le GHG Protocol / ISO 14064-1, " +
-  "prêtes à être réutilisées dans vos échanges avec vos clients européens. mizancarbone reste un outil de " +
-  "préparation interne : aucune transmission automatique à une autorité ou un registre.";
+  "Finalité : préparation de données pour vos échanges avec vos clients européens. Méthode : données d'activité " +
+  "et émissions du bilan organisationnel, regroupées par produit alloué — ce n'est pas un calcul des émissions " +
+  "intrinsèques des marchandises. Sources : facteurs listés avec leur provenance. Complétude : voir la checklist. " +
+  "Aucune transmission à une autorité ou à un registre.";
 
 // Rappel explicite du positionnement V1, distinct de CBAM_FRAMING_NOTE (qui
 // dit ce que l'outil FAIT) : celui-ci dit ce qu'il NE fait PAS, pour ne
@@ -26,16 +57,17 @@ export const CBAM_FRAMING_NOTE =
 export const CBAM_NOT_OFFICIAL_NOTE =
   "Ce document ne constitue pas un dépôt réglementaire officiel au titre du CBAM et ne remplace pas les " +
   "procédures, registres ou vérifications réglementaires applicables — le déclarant CBAM reste exclusivement " +
-  "l'importateur européen. Le calcul avancé des émissions intégrées par produit / code SH n'est pas réalisé " +
-  "dans cette version : ce document reste un rapport de préparation des données, pas un moteur CBAM.";
+  "l'importateur européen. Ce document reste un rapport de préparation des données. Les émissions intrinsèques par procédé (règlement d'exécution (UE) 2025/2547) sont " +
+  "préparées séparément, uniquement pour les biens simples et avec les éléments manquants signalés ; le " +
+  "règlement 2023/1773 ne concernait que la période transitoire.";
 
 // Distingue explicitement les lignes "matière première" (traçabilité
 // uniquement) des lignes "énergie" (tCO2e calculé) — une valeur absente ne
 // doit jamais être lue comme "émissions nulles vérifiées".
 export const CBAM_METHODOLOGY_NOTE =
   "Les lignes « matière première » sont des données de traçabilité (quantité, fournisseur) : elles n'incluent " +
-  "aucune émission calculée ligne par ligne — le Scope 3 est estimé globalement au module Calcul des émissions, " +
-  "pas matière par matière. Une valeur tCO2e absente signifie « non calculé », jamais « émissions nulles vérifiées ».";
+  "aucune émission calculée ligne par ligne. Les achats de matières ne sont comptés en Scope 3 que s'ils sont " +
+  "saisis comme achats avec un facteur explicite. Une valeur tCO2e absente signifie « non calculé », jamais « zéro ».";
 
 async function getCompany(companyId) {
   const result = await pool.query('SELECT id, name, sector FROM companies WHERE id = $1', [companyId]);
@@ -75,6 +107,11 @@ async function getPreparationEntries(companyId) {
      LEFT JOIN sites s ON s.id = ae.site_id
      WHERE ae.company_id = $1 AND ae.deleted_at IS NULL
        AND ae.factor_code NOT LIKE 'scope3_ratio_%'
+       -- Les données Scope 3 (achats, fret, déchets…) ne relèvent pas des
+       -- émissions d'une installation : jamais reprises dans ce document.
+       AND NOT EXISTS (
+         SELECT 1 FROM emission_factors ef3 WHERE ef3.code = ae.factor_code AND ef3.scope = 3
+       )
      ORDER BY ae.product_allocation NULLS LAST, ae.period_start`,
     [companyId],
   );
@@ -185,7 +222,7 @@ export async function buildCsvExport(companyId) {
   const { entries } = await getPreparationSummary(companyId);
   const headers = [
     'produit', 'site', 'periode_debut', 'periode_fin', 'nature', 'description',
-    'quantite', 'unite', 'fournisseur', 'tco2e', 'source_facteur', 'facteur_national', 'statut_verification',
+    'quantite', 'unite', 'fournisseur', 'tco2e', 'source_facteur', 'facteur_national', 'statut_controle_interne',
   ];
 
   const lines = [
@@ -209,6 +246,16 @@ export async function buildCsvExport(companyId) {
     ].join(',')),
   ];
 
+  const processes = processRows(await listProcesses(companyId));
+  lines.push(
+    '',
+    csvEscape(CBAM_PROCESS_NOTE),
+    ['installation', 'procede', 'produit', 'code_nc', 'periode', 'production_t', 'statut', 'emissions_directes_tco2e',
+      'emissions_indirectes_tco2e', 'emissions_specifiques_directes_tco2e_par_t', 'emissions_specifiques_indirectes_tco2e_par_t', 'elements_manquants_ou_non_pris_en_charge'].join(','),
+    ...processes.map((r) => [r.installation, r.process, r.product, r.cnCode, r.period, r.production ?? '', r.status,
+      r.direct ?? '', r.indirect ?? '', r.seeDirect ?? '', r.seeIndirect ?? '', r.gaps].map(csvEscape).join(',')),
+  );
+
   return { filename: `donnees-preparation-cbam-${new Date().toISOString().slice(0, 10)}.csv`, content: lines.join('\n') };
 }
 
@@ -229,7 +276,7 @@ export async function buildXlsxExport(companyId) {
     ['Positionnement', CBAM_FRAMING_NOTE],
     ["Ce que ce document n'est pas", CBAM_NOT_OFFICIAL_NOTE],
     ['Méthode', CBAM_METHODOLOGY_NOTE],
-    ['Statuts', "Réel : calculé à partir de données saisies · Non calculé : donnée saisie sans résultat d'émission (matière première, ou facteur indisponible pour la période) · À vérifier : ligne partiellement vérifiée."],
+    ['Statuts', "Réel : calculé à partir de données saisies · Non calculé : donnée saisie sans résultat d'émission (matière première, ou facteur indisponible pour la période) · Contrôle interne partiel : anomalie signalée lors du contrôle interne."],
     ['Onglets', 'Synthèse par produit · Détail des lignes · Checklist · Sources des facteurs'],
   ]);
 
@@ -304,7 +351,7 @@ export async function buildXlsxExport(companyId) {
       { item: 'Produits renseignés', state: availability(checklist.produitDisponible), detail: `${checklist.donneesManquantes.nonAlloueCount} ligne(s) non allouée(s) à un produit` },
       { item: 'Matières premières tracées', state: availability(checklist.matierePremiereDisponible), detail: '' },
       { item: 'Facteurs documentés', state: availability(checklist.facteursDocumentes), detail: 'Voir l\'onglet « Sources des facteurs »' },
-      { item: 'Éléments à vérifier', state: checklist.aVerifierCount === 0 ? 'Aucun' : `${checklist.aVerifierCount} à vérifier`, detail: '' },
+      { item: 'Contrôle interne', state: checklist.aVerifierCount === 0 ? 'Aucune anomalie signalée' : `${checklist.aVerifierCount} anomalie(s) signalée(s)`, detail: '' },
     ],
   );
 
@@ -326,6 +373,26 @@ export async function buildXlsxExport(companyId) {
       { header: 'Facteur national', key: 'isNational', width: 16 },
     ],
     [...factorSources.values()],
+  );
+
+  addTableSheet(
+    workbook,
+    'Procédés CBAM',
+    [
+      { header: 'Installation', key: 'installation', width: 26 },
+      { header: 'Procédé', key: 'process', width: 24 },
+      { header: 'Produit', key: 'product', width: 22 },
+      { header: 'Code NC', key: 'cnCode', width: 12 },
+      { header: 'Période', key: 'period', width: 24 },
+      { header: 'Production (t)', key: 'production', width: 14, numFmt: '#,##0.###' },
+      { header: 'Statut', key: 'status', width: 34 },
+      { header: 'Directes (tCO2e)', key: 'direct', width: 16, numFmt: TCO2E_FORMAT },
+      { header: 'Indirectes (tCO2e)', key: 'indirect', width: 16, numFmt: TCO2E_FORMAT },
+      { header: 'Spécifiques directes (tCO2e/t)', key: 'seeDirect', width: 18, numFmt: '0.000000' },
+      { header: 'Spécifiques indirectes (tCO2e/t)', key: 'seeIndirect', width: 18, numFmt: '0.000000' },
+      { header: 'Éléments manquants / non pris en charge', key: 'gaps', width: 90 },
+    ],
+    processRows(await listProcesses(companyId)),
   );
 
   return { filename: `donnees-preparation-cbam-${today}.xlsx`, buffer: await workbookToBuffer(workbook) };
@@ -350,11 +417,11 @@ function checklistRow(label, available, note) {
 function verificationRow(count) {
   const tag = count === 0
     ? '<span class="status-tag" data-status="reel">Aucun</span>'
-    : `<span class="status-tag" data-status="non_calcule">${count} à vérifier</span>`;
+    : `<span class="status-tag" data-status="non_calcule">${count} à reprendre</span>`;
   const detail = count > 0
-    ? `${count} ligne(s) marquée(s) « partiellement vérifiée »`
-    : 'Aucune ligne marquée à vérifier';
-  return `<tr><td>Éléments à vérifier</td><td>${tag}</td><td>${escapeCell(detail)}</td></tr>`;
+    ? `${count} ligne(s) avec anomalie signalée au contrôle interne`
+    : 'Aucune anomalie signalée au contrôle interne';
+  return `<tr><td>Contrôle interne</td><td>${tag}</td><td>${escapeCell(detail)}</td></tr>`;
 }
 
 // Séparée de buildPdfExport pour être testable directement (même
@@ -381,7 +448,7 @@ export async function buildPreparationReportHtml(companyId) {
     ? 'Aucune donnée saisie pour le moment.'
     : checklist.donneesManquantes.energieNonCalculeeCount > 0 || checklist.donneesManquantes.nonAlloueCount > 0
       ? 'Préparation en cours — données partielles (voir « Données manquantes » ci-dessous).'
-      : 'Données de base réunies pour les lignes saisies — vérification manuelle recommandée avant transmission.';
+      : 'Données de base réunies pour les lignes saisies — contrôle interne recommandé avant transmission.';
 
   const summaryHtml = `
     <h2>Résumé exécutif</h2>
@@ -444,6 +511,22 @@ export async function buildPreparationReportHtml(companyId) {
     })
     .join('');
 
+  const processes = processRows(await listProcesses(companyId));
+  const processesHtml = processes.length === 0
+    ? '<p>Aucun procédé renseigné.</p>'
+    : `<table>
+        <thead><tr><th>Installation / procédé</th><th>Produit (NC)</th><th>Production</th><th>Statut</th><th>Spécifiques directes</th><th>Spécifiques indirectes</th></tr></thead>
+        <tbody>${processes.map((r) => `
+          <tr>
+            <td>${escapeCell(r.installation)} — ${escapeCell(r.process)}<br><span class="mono">${escapeCell(r.period)}</span></td>
+            <td>${escapeCell(r.product)} (<span class="mono">${escapeCell(r.cnCode)}</span>)</td>
+            <td class="mono">${r.production === null ? 'Non renseignée' : `${formatTco2e(r.production)} t`}</td>
+            <td>${escapeCell(r.status)}${r.gaps ? `<br><span style="font-size:9px;">${escapeCell(r.gaps)}</span>` : ''}</td>
+            <td class="mono">${r.seeDirect === null ? 'Non calculé' : `${formatTco2e(r.seeDirect, { maximumFractionDigits: 6 })} tCO2e/t`}</td>
+            <td class="mono">${r.seeIndirect === null ? 'Non calculé' : `${formatTco2e(r.seeIndirect, { maximumFractionDigits: 6 })} tCO2e/t`}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+
   const bodyHtml = `
     ${summaryHtml}
     <p>${CBAM_FRAMING_NOTE}</p>
@@ -452,6 +535,9 @@ export async function buildPreparationReportHtml(companyId) {
     ${checklistHtml}
     <h2>Données par produit</h2>
     ${groupsHtml || '<p>Aucune donnée à exporter pour le moment.</p>'}
+    <h2>Procédés — émissions intrinsèques</h2>
+    <div class="callout">${escapeCell(CBAM_PROCESS_NOTE)}</div>
+    ${processesHtml}
   `;
 
   return renderBrandedHtml({

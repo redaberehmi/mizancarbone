@@ -25,7 +25,7 @@ async function insertFactor({ code, scope, category, isNational = false, value =
   return res.rows[0].id;
 }
 
-async function insertEntryAndResult({ companyId: entryCompanyId = companyId, siteId = null, periodStart, periodEnd, factorCode, factorId, scope, tco2e, verificationStatus = 'non_verifie' }) {
+async function insertEntryAndResult({ companyId: entryCompanyId = companyId, siteId = null, periodStart, periodEnd, factorCode, factorId, scope, tco2e, verificationStatus = 'non_controle' }) {
   const entryRes = await pool.query(
     `INSERT INTO activity_entries (company_id, site_id, period_start, period_end, factor_code, quantity)
      VALUES ($1, $2, $3, $4, $5, 1) RETURNING id`,
@@ -194,12 +194,12 @@ describe('Qualité méthodologique', () => {
 
   it('répartit verification_status en % du total tCO2e', async () => {
     const factorId = await insertFactor({ code: 'diesel_L', scope: 1, category: 'combustion_mobile' });
-    await insertEntryAndResult({ periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', factorId, scope: 1, tco2e: 70, verificationStatus: 'totalement_verifie' });
-    await insertEntryAndResult({ periodStart: '2024-02-01', periodEnd: '2024-02-28', factorCode: 'diesel_L', factorId, scope: 1, tco2e: 30, verificationStatus: 'non_verifie' });
+    await insertEntryAndResult({ periodStart: '2024-01-01', periodEnd: '2024-01-31', factorCode: 'diesel_L', factorId, scope: 1, tco2e: 70, verificationStatus: 'controle_interne_effectue' });
+    await insertEntryAndResult({ periodStart: '2024-02-01', periodEnd: '2024-02-28', factorCode: 'diesel_L', factorId, scope: 1, tco2e: 30, verificationStatus: 'non_controle' });
 
     const quality = await getQualityMetrics(companyId);
-    const totalement = quality.verificationBreakdown.find((v) => v.status === 'totalement_verifie');
-    const nonVerifie = quality.verificationBreakdown.find((v) => v.status === 'non_verifie');
+    const totalement = quality.verificationBreakdown.find((v) => v.status === 'controle_interne_effectue');
+    const nonVerifie = quality.verificationBreakdown.find((v) => v.status === 'non_controle');
     expect(totalement.pctOfTotal).toBeCloseTo(70, 5);
     expect(nonVerifie.pctOfTotal).toBeCloseTo(30, 5);
   });

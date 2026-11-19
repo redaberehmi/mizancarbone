@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client.js';
+import { api, ApiError } from '../api/client.js';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { SectionHeader } from '../components/SectionHeader.jsx';
@@ -28,6 +28,84 @@ const TIER_LABELS = {
   3: 'Non éligible',
 };
 
+function CarbonCostSimulator() {
+  const [status, setStatus] = useState(null);
+  const [form, setForm] = useState({ pricePerTco2e: '', currency: 'MAD', year: String(new Date().getFullYear() - 1), scope1: true, scope2: true, scope3: false, scope2Method: 'location' });
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    api.get('/financing/carbon-cost/status').then(setStatus);
+  }, []);
+  const run = async (e) => {
+    e.preventDefault();
+    setError(null);
+    const scopes = [form.scope1 && 1, form.scope2 && 2, form.scope3 && 3].filter(Boolean);
+    try {
+      setResult(await api.post('/financing/carbon-cost/simulate', {
+        pricePerTco2e: Number(form.pricePerTco2e), currency: form.currency, scopes, year: Number(form.year), scope2Method: form.scope2Method,
+      }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Erreur inattendue.');
+    }
+  };
+  return (
+    <div className="card space-y-3">
+      <SectionHeader icon={IconCalculator} title="Simulation de coût carbone" />
+      {status && (
+        <div className="rounded-lg border border-mizan-alerte/30 bg-mizan-alerte/5 px-4 py-3 space-y-1">
+          <p className="text-sm text-mizan-alerte">{status.disclaimer}</p>
+          <p className="text-xs text-mizan-gris">Statut réglementaire (vérifié le {status.regulatoryStatus.checkedOn}) : {status.regulatoryStatus.detail}</p>
+        </div>
+      )}
+      <form onSubmit={run} className="grid md:grid-cols-4 gap-3 items-end">
+        <div>
+          <label className="label-field">Prix par tCO2e (hypothèse)</label>
+          <input type="number" min="0" step="any" required className="input-field font-data" value={form.pricePerTco2e} onChange={(e) => setForm({ ...form, pricePerTco2e: e.target.value })} />
+        </div>
+        <div>
+          <label className="label-field">Devise</label>
+          <select className="input-field" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+            <option>MAD</option><option>EUR</option><option>USD</option>
+          </select>
+        </div>
+        <div>
+          <label className="label-field">Année des émissions</label>
+          <input type="number" min="2000" max="2100" required className="input-field font-data" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} />
+        </div>
+        <div>
+          <label className="label-field">Scope 2 retenu</label>
+          <select className="input-field" value={form.scope2Method} onChange={(e) => setForm({ ...form, scope2Method: e.target.value })}>
+            <option value="location">Location-based</option>
+            <option value="market">Market-based</option>
+          </select>
+        </div>
+        <div className="md:col-span-3 flex flex-wrap gap-4 text-sm">
+          <span className="label-field mb-0">Périmètre (hypothèse de simulation) :</span>
+          {[1, 2, 3].map((n) => (
+            <label key={n} className="flex items-center gap-1"><input type="checkbox" checked={form[`scope${n}`]} onChange={(e) => setForm({ ...form, [`scope${n}`]: e.target.checked })} /> Scope {n}</label>
+          ))}
+        </div>
+        <button type="submit" className="btn-primary">Simuler</button>
+      </form>
+      {error && <p className="text-sm text-mizan-alerte">{error}</p>}
+      {result && result.status === 'non_calculable' && (
+        <p className="text-sm text-mizan-alerte">{result.statusDetail}</p>
+      )}
+      {result && result.status !== 'non_calculable' && (
+        <div>
+          {result.statusDetail && <p className="text-sm text-mizan-alerte mb-1">{result.statusDetail}</p>}
+          <p className="font-data text-2xl text-mizan-ardoise">{formatMad(result.simulatedCost)} {result.currency} <span className="text-sm text-mizan-gris">(simulation{result.status === 'partiel' ? ' partielle' : ''})</span></p>
+          <p className="text-sm text-mizan-gris mt-1">
+            Hypothèses : {result.assumptions.pricePerTco2e} {result.currency}/tCO2e · Scope {result.assumptions.scopes.join(' + ')}
+            {result.assumptions.scope2Method ? ` (Scope 2 ${result.assumptions.scope2Method === 'market' ? 'market-based' : 'location-based'})` : ''} · année {result.assumptions.year} ·
+            {' '}émissions retenues <span className="font-data">{formatTco2e(result.consideredTco2e)} tCO2e</span>. {result.note}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FinancingWatch() {
   const [eligibility, setEligibility] = useState(null);
   const [simulation, setSimulation] = useState(null);
@@ -50,8 +128,8 @@ export function FinancingWatch() {
     <div className="space-y-6 max-w-5xl">
       <PageHeader
         icon={IconWallet}
-        title="Financements & taxe carbone"
-        subtitle="Veille des dispositifs de financement et simulation indicative de la taxe carbone nationale."
+        title="Financements & coût carbone"
+        subtitle="Veille des dispositifs de financement et simulation interne de coût carbone (hypothèses explicites, aucune taxe confirmée)."
       />
 
       <div className="rounded-lg border border-mizan-menthe bg-mizan-menthe/15 px-4 py-3">
@@ -223,60 +301,7 @@ export function FinancingWatch() {
         )}
       </div>
 
-      <div className="card">
-        <SectionHeader icon={IconCalculator} title="Simulateur — taxe carbone nationale" />
-        <p className="text-sm text-mizan-gris mb-4 -mt-2">
-          {simulation.available
-            ? "Vos émissions sont calculées par scope ci-dessous ; le périmètre retenu pour la taxe est précisé dans l'encart en dessous."
-            : "Le périmètre de scopes réellement soumis à la taxe n'est pas encore fixé par la Loi de Finances 2026 — vos émissions sont déjà calculées par scope ci-dessous, prêtes à être combinées dès que ce périmètre sera confirmé."}
-        </p>
-
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <div className="rounded-lg bg-mizan-menthe/20 border border-mizan-menthe px-3 py-2">
-            <p className="text-xs text-mizan-gris">Scope 1</p>
-            <p className="font-data text-lg text-mizan-ardoise">{formatTco2e(simulation.breakdown.scope1Tco2e)}</p>
-          </div>
-          <div className="rounded-lg bg-mizan-menthe/20 border border-mizan-menthe px-3 py-2">
-            <p className="text-xs text-mizan-gris">Scope 2 (location-based)</p>
-            <p className="font-data text-lg text-mizan-ardoise">{formatTco2e(simulation.breakdown.scope2LocationBasedTco2e)}</p>
-          </div>
-          <div className="rounded-lg bg-mizan-menthe/20 border border-mizan-menthe px-3 py-2">
-            <p className="text-xs text-mizan-gris">Scope 3 (estimation)</p>
-            <p className="font-data text-lg text-mizan-ardoise">{formatTco2e(simulation.breakdown.scope3Tco2e)}</p>
-          </div>
-        </div>
-
-        {!simulation.available ? (
-          <EmptyState
-            title="Simulateur en attente du taux et du périmètre officiels"
-            description="Ni le taux ni le périmètre de scopes soumis à la taxe carbone nationale ne sont encore stabilisés (Loi de Finances 2026). Dès qu'ils seront publiés et intégrés, la simulation s'appliquera automatiquement à vos émissions déjà calculées ci-dessus."
-          />
-        ) : (
-          <div>
-            <div className="rounded-lg border border-mizan-alerte/30 bg-mizan-alerte/5 px-4 py-3 mb-4 space-y-1">
-              <p className="text-sm text-mizan-alerte">
-                Base de calcul actuelle : Scope {[...simulation.taxableScopes].sort().join(' + ')} — hypothèse
-                en attente de confirmation par la Loi de Finances 2026.
-              </p>
-              <p className="text-sm text-mizan-alerte">
-                Estimation indicative — les paramètres restent susceptibles d'évoluer tant que la LF2026 n'est
-                pas pleinement stabilisée. Source : {simulation.source}.
-              </p>
-            </div>
-            <p className="font-data text-2xl text-mizan-ardoise">
-              {formatMad(simulation.estimatedTaxMad)} MAD
-            </p>
-            <p className="text-sm text-mizan-gris mt-1">
-              Total retenu : <span className="font-data">{formatTco2e(simulation.totalTco2eConsidered)} tCO2e</span> ·
-              {' '}Taux : <span className="font-data">{simulation.ratePerTco2e} MAD/tCO2e</span>
-              {simulation.thresholdTco2e !== null && (
-                <> · Seuil d'assujettissement : <span className="font-data">{formatTco2e(simulation.thresholdTco2e)} tCO2e</span>
-                  {' '}({simulation.aboveThreshold ? 'dépassé' : 'non atteint'})</>
-              )}
-            </p>
-          </div>
-        )}
-      </div>
+      <CarbonCostSimulator />
     </div>
   );
 }

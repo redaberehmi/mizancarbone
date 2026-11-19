@@ -405,9 +405,70 @@ export async function getAlerts(companyId) {
 // existant (getEmissionsSummary, /api/calculations/summary) reste la source
 // pour la répartition par scope et par site déjà en place.
 // ============================================================
+// Comparaison sectorielle : uniquement avec une référence documentée
+// (source, année, secteur, territoire, unité, périmètre, échantillon).
+// Sinon « comparaison indisponible » — jamais une moyenne approximative.
+async function getSectorComparison(company, carbonIntensity) {
+  const r = await pool.query(
+    `SELECT intensity_tco2e_per_mdh, source, reference_year, territory, unit, perimeter, sample_description
+     FROM sector_benchmarks
+     WHERE sector = $1 AND intensity_tco2e_per_mdh IS NOT NULL AND source IS NOT NULL AND reference_year IS NOT NULL
+       AND territory IS NOT NULL AND unit IS NOT NULL AND perimeter IS NOT NULL AND sample_description IS NOT NULL
+       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+     ORDER BY valid_from DESC LIMIT 1`,
+    [company?.sector ?? null],
+  );
+  if (r.rows.length === 0) {
+    return { available: false, label: 'Comparaison indisponible', reason: 'Aucune référence sectorielle documentée (source, année, secteur, territoire, unité, périmètre, échantillon).' };
+  }
+  const ref = r.rows[0];
+  return { available: carbonIntensity !== null, reference: ref, companyIntensity: carbonIntensity };
+}
+
+// Avertit quand la comparaison avec l'année de référence peut être
+// affectée par un changement de périmètre ou de méthode examiné.
+async function getComparabilityNotes(companyId) {
+  const r = await pool.query(
+    `SELECT trigger_type, decision, created_at FROM base_year_recalculation_reviews
+     WHERE company_id = $1 ORDER BY id DESC LIMIT 5`,
+    [companyId],
+  );
+  return r.rows.map((x) => ({
+    triggerType: x.trigger_type,
+    decision: x.decision,
+    message:
+      x.decision === 'recalcul_valide'
+        ? "Un recalcul de l'année de référence a été validé : comparez avec prudence tant que les données de l'année de référence n'ont pas été recalculées."
+        : x.decision === 'en_attente'
+          ? "Un changement de périmètre ou de méthode est en cours d'examen : la comparaison avec l'année de référence peut ne pas être homogène."
+          : "Un changement examiné n'a pas donné lieu à recalcul (sous le seuil ou non retenu).",
+  }));
+}
+
 export async function getDashboardAnalytics(companyId) {
   const company = await getCompany(companyId);
   const yearlyTotals = await getYearlyScope12Totals(companyId);
+  // Si un recalcul de l'année de référence a été validé, la comparaison
+  // utilise la dernière version de l'inventaire de cette année (les
+  // résultats enregistrés, eux, ne changent jamais).
+  if (company?.base_year) {
+    const v = await pool.query(
+      `SELECT version_number, total_scope12_tco2e FROM base_year_inventory_versions
+       WHERE company_id = $1 AND base_year = $2 ORDER BY version_number DESC LIMIT 1`,
+      [companyId, company.base_year],
+    );
+    if (v.rows.length > 0) {
+      const row = yearlyTotals.find((y) => y.year === company.base_year);
+      const total = Number(v.rows[0].total_scope12_tco2e);
+      if (row) {
+        row.totalTco2e = total;
+        row.inventoryVersion = v.rows[0].version_number;
+      } else {
+        yearlyTotals.push({ year: company.base_year, totalTco2e: total, inventoryVersion: v.rows[0].version_number });
+        yearlyTotals.sort((a, b) => a.year - b.year);
+      }
+    }
+  }
   const yearlyComparison = resolveYearlyComparison(yearlyTotals, company?.base_year ?? null);
 
   const [topContributors, quality, completeness, alerts, taxSimulation] = await Promise.all([
@@ -434,5 +495,7 @@ export async function getDashboardAnalytics(companyId) {
     completeness,
     alerts,
     taxSimulation,
+    sectorComparison: await getSectorComparison(company, carbonIntensity),
+    comparabilityNotes: await getComparabilityNotes(companyId),
   };
 }

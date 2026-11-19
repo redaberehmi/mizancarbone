@@ -58,7 +58,7 @@ describe('Secteurs — chaque secteur a un placeholder Scope 3 structurellement 
     "le placeholder scope3_ratio_%s existe, vaut 0 et est structurellement inactif (valid_to = valid_from)",
     async (sector) => {
       const result = await pool.query(
-        `SELECT value_kgco2e, valid_from, valid_to FROM emission_factors WHERE code = $1`,
+        `SELECT value_kgco2e, valid_from, valid_to FROM emission_factors WHERE code = $1 AND source LIKE 'PLACEHOLDER%'`,
         [`scope3_ratio_${sector}`],
       );
       expect(result.rows).toHaveLength(1);
@@ -80,7 +80,7 @@ describe('Secteurs — chaque secteur a un placeholder Scope 3 structurellement 
       const res = await agent.get('/api/calculations/scope3/readiness');
       expect(res.status).toBe(200);
       expect(res.body.sector).toBe(sector);
-      expect(res.body.sectorRatioAvailable).toBe(false);
+      expect(res.body.legacySectorRatio.available).toBe(false);
     },
   );
 });

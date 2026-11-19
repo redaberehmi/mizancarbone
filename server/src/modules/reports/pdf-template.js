@@ -170,8 +170,8 @@ export function renderBrandedHtml({ title, companyName, generatedAtLabel, bodyHt
   <h1>${escapeHtml(title)}</h1>
   ${bodyHtml}
   <footer class="doc-footer">
-    mizancarbone — outil de préparation interne de données carbone. Ce document
-    est structuré selon le GHG Protocol / ISO 14064-1.
+    mizancarbone — outil de collecte, de calcul et de préparation des inventaires de gaz à effet de serre,
+    avec traçabilité des données et des hypothèses. Document interne, non vérifié par un tiers.
   </footer>
 </body>
 </html>`;

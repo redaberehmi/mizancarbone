@@ -19,15 +19,12 @@
 //   zero_reel   : calculé, méthode directe, résultat réellement nul
 //   reel        : calculé, méthode directe, résultat positif
 //
-// "à vérifier" n'est PAS un statut concurrent de ceux ci-dessus : c'est une
-// annotation orthogonale (needsVerification), portée par le champ réel
-// emission_results.verification_status = 'partiellement_verifie'. Le
-// confondre avec le statut de base aurait deux effets indésirables :
-//   - marquer 100% des lignes "à vérifier" par défaut (verification_status
-//     vaut 'non_verifie' pour toute donnée V1, ce workflow n'étant pas
-//     encore éditable — Module 8, V1.5) : bruyant et sans valeur informative
-//   - perdre l'information de statut de base (estimé/réel/non calculé)
-//     qu'un simple remplacement écraserait
+// « contrôle interne partiel » n'est PAS un statut concurrent de ceux
+// ci-dessus : c'est une annotation orthogonale (needsVerification, nom
+// historique), portée par emission_results.verification_status =
+// 'controle_interne_partiel'. Il s'agit d'un contrôle INTERNE à
+// l'entreprise ; aucune vérification par un tiers n'est réalisée par l'outil
+// (voir external_assurance_statements pour l'enregistrement d'un avis externe).
 // ============================================================
 
 export const STATUS_LABELS = {
@@ -46,7 +43,7 @@ export function formatStatusLabel(status, annotations = {}) {
   const { needsVerification = false, incomplete = false } = annotations;
   let label = STATUS_LABELS[status] ?? status;
   if (incomplete) label += ' · données incomplètes';
-  if (needsVerification) label += ' · à vérifier';
+  if (needsVerification) label += ' · contrôle interne partiel';
   return label;
 }
 
@@ -67,7 +64,7 @@ export function determineAggregateStatus({
   calculatedCount,
   sumTco2e,
   isEstimation = false,
-  hasPartiallyVerified = false,
+  hasPartialInternalControl = false,
 }) {
   const hasUncalculatedEntries = entryCount > calculatedCount;
 
@@ -78,11 +75,11 @@ export function determineAggregateStatus({
     return { status: 'non_calcule', needsVerification: false, hasUncalculatedEntries: true };
   }
   if (isEstimation) {
-    return { status: 'estime', needsVerification: hasPartiallyVerified, hasUncalculatedEntries };
+    return { status: 'estime', needsVerification: hasPartialInternalControl, hasUncalculatedEntries };
   }
   return {
     status: Number(sumTco2e) === 0 ? 'zero_reel' : 'reel',
-    needsVerification: hasPartiallyVerified,
+    needsVerification: hasPartialInternalControl,
     hasUncalculatedEntries,
   };
 }
@@ -91,7 +88,7 @@ export function determineAggregateStatus({
 // isRawMaterial : ligne de traçabilité matière première — jamais calculée
 // en V1 par choix méthodologique, distinct d'une donnée simplement absente.
 export function determineLineStatus({ isRawMaterial, tco2e, verificationStatus }) {
-  const needsVerification = verificationStatus === 'partiellement_verifie';
+  const needsVerification = verificationStatus === 'controle_interne_partiel';
   if (isRawMaterial) {
     return { status: 'non_calcule', needsVerification: false };
   }

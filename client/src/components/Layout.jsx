@@ -18,6 +18,8 @@ function navItemsForCompany(company) {
     { to: '/entreprise', label: 'Entreprise', icon: IconBuilding },
     { to: '/collecte', label: 'Collecte de données', icon: IconDatabase },
     { to: '/calcul', label: 'Calcul des émissions', icon: IconCalculator },
+    { to: '/electricite', label: 'Électricité (Scope 2)', icon: IconLeaf },
+    { to: '/methodologie', label: 'Méthodologie', icon: IconFileCheck },
   ];
   // Le module reste accessible pour tous les secteurs (jamais bloqué), juste
   // libellé différemment pour signaler que ce n'est pas la priorité par
@@ -27,7 +29,8 @@ function navItemsForCompany(company) {
     label: CBAM_COVERED_SECTORS.includes(company?.sector) ? 'Préparation CBAM' : 'Préparation CBAM (optionnel)',
     icon: IconFileCheck,
   });
-  items.push({ to: '/financements', label: 'Financements & taxe carbone', icon: IconWallet });
+  items.push({ to: '/cbam-procedes', label: 'CBAM — procédés', icon: IconFileCheck });
+  items.push({ to: '/financements', label: 'Financements & coût carbone', icon: IconWallet });
   return items;
 }
 

@@ -10,6 +10,9 @@ import { CalculationResults } from './pages/CalculationResults.jsx';
 import { CbamPreparation } from './pages/CbamPreparation.jsx';
 import { FinancingWatch } from './pages/FinancingWatch.jsx';
 import { Dashboard } from './pages/Dashboard.jsx';
+import { ElectricityContracts } from './pages/ElectricityContracts.jsx';
+import { Methodology } from './pages/Methodology.jsx';
+import { CbamProduction } from './pages/CbamProduction.jsx';
 
 export default function App() {
   return (
@@ -64,6 +67,36 @@ export default function App() {
               <ProtectedRoute>
                 <Layout>
                   <FinancingWatch />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/electricite"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <ElectricityContracts />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/methodologie"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Methodology />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/cbam-procedes"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <CbamProduction />
                 </Layout>
               </ProtectedRoute>
             }

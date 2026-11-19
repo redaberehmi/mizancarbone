@@ -16,11 +16,26 @@ function withPeriodOrderCheck(schema) {
   });
 }
 
+// Saisie générique (Scope 1, 2 et 3). Selon la catégorie du facteur :
+//  - quantité directe dans l'unité du facteur (cas général) ;
+//  - montant en MAD pour un facteur en kgCO2e/kMAD (aucune conversion de
+//    devise : quantité = montant / 1000) ;
+//  - masse (t) × distance (km) pour un facteur de fret en tonne.km.
 export const energyEntrySchema = withPeriodOrderCheck(
   z.object({
-    ...periodFields,
-    factorCode: z.string().trim().min(1).max(64),
-    quantity: z.number().positive().max(1_000_000_000),
+    siteId: z.number().int().positive().nullable().optional(),
+    periodStart: dateSchema,
+    periodEnd: dateSchema,
+    sourceDocument: z.string().trim().max(255).optional(),
+    factorCode: z.string().trim().min(1).max(96),
+    quantity: z.number().positive().max(1_000_000_000_000).optional(),
+    amountMad: z.number().positive().max(1_000_000_000_000).optional(),
+    massTonnes: z.number().positive().max(1_000_000_000).optional(),
+    distanceKm: z.number().positive().max(100_000).optional(),
+    scope3Category: z.number().int().min(1).max(15).optional(),
+    dataOrigin: z.enum(['mesuree', 'estimee']).optional(),
+    description: z.string().trim().max(255).optional(),
+    factorJustification: z.string().trim().max(2000).optional(),
   }),
 );
 

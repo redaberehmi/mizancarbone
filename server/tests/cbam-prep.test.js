@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { app, resetDatabase, closeDatabase } from './helpers/testApp.js';
+import { addTestScope3Purchase, removeTestScope3Purchases } from './helpers/scope3.js';
 import { pool } from '../src/config/db.js';
 
 // Découpe une ligne CSV en respectant les guillemets (certains champs, ex.
@@ -255,19 +256,7 @@ describe('GET /api/cbam-prep/summary', () => {
     // Active réellement une estimation Scope 3 pour prouver l'exclusion,
     // pas juste vérifier l'absence d'un mot-clé qui n'apparaîtrait de toute
     // façon jamais.
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 10, 'Test rate', '2024-01-01')`,
-    );
-    const estimateRes = await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-01-01',
-      periodEnd: '2024-12-31',
-      amountMad: 100000,
-    });
+    const estimateRes = await addTestScope3Purchase(agent, { periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000 });
     expect(estimateRes.status).toBe(201);
 
     const res = await agent.get('/api/cbam-prep/summary');
@@ -275,9 +264,7 @@ describe('GET /api/cbam-prep/summary', () => {
     expect(res.body.entries).toHaveLength(1);
     expect(res.body.entries[0].kind).toBe('energie');
 
-    await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
-    await pool.query(`DELETE FROM emission_factors WHERE source = 'Test ADEME'`);
-    await pool.query(`DELETE FROM exchange_rates WHERE source = 'Test rate'`);
+    await removeTestScope3Purchases();
   });
 });
 
@@ -331,7 +318,7 @@ describe('GET /api/cbam-prep/export.xlsx', () => {
     await workbook.xlsx.load(res.body);
 
     expect(workbook.worksheets.map((s) => s.name)).toEqual([
-      'Informations', 'Synthèse par produit', 'Détail des lignes', 'Checklist', 'Sources des facteurs',
+      'Informations', 'Synthèse par produit', 'Détail des lignes', 'Checklist', 'Sources des facteurs', 'Procédés CBAM',
     ]);
 
     const detail = workbook.getWorksheet('Détail des lignes');
@@ -483,7 +470,7 @@ describe('Checklist et statut des données — préparation CBAM', () => {
     const { buildPreparationReportHtml } = await import('../src/modules/cbam-prep/cbam-prep.service.js');
     const html = await buildPreparationReportHtml(companyRes.body.company.id);
 
-    const rowMatch = html.match(/Éléments à vérifier<\/td>.*?<\/tr>/s);
+    const rowMatch = html.match(/Contrôle interne<\/td>.*?<\/tr>/s);
     expect(rowMatch).not.toBeNull();
     expect(rowMatch[0]).not.toContain('>Disponible<');
   });

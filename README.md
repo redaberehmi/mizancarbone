@@ -725,3 +725,86 @@ Rappels pour la suite :
 - Tests exécutés dans cet environnement via PostgreSQL embarqué
   (`embedded-postgres`, devDependency) ; jamais testé contre un vrai serveur
   PostgreSQL de production.
+
+## Révision méthodologique (novembre 2026)
+
+Suite au retour de l'experte carbone. Formulation de référence de l'outil :
+« Outil de collecte, de calcul et de préparation des inventaires de gaz à
+effet de serre, avec traçabilité des données et des hypothèses. »
+
+- **Registre des facteurs** : métadonnées par facteur (identifiant stable,
+  version, périmètre couvert, année représentée distincte de la période
+  d'utilisation et de la date d'intégration, fichier / feuille / cellule,
+  incertitude, restrictions, statut méthodologique et statut des droits
+  séparés). Migration `1738000011000_methodology_registry.sql` (additive) et
+  seed `010_factor_registry_metadata.sql`.
+- **Import FM6E** : `node src/db/import/fm6e-import.js --file "<classeur>"`
+  (aperçu) puis `--apply`. Voir `data/sources/README.md`. Ne pas appliquer à la
+  base de production tant que les droits de réutilisation ne sont pas confirmés.
+- **Scope 1** : un facteur « combustion + amont » ne produit jamais de résultat
+  Scope 1 (contrôle à la saisie et au calcul). Postes procédés et fluides
+  frigorigènes (masse rechargée = fuite) ajoutés.
+- **Scope 2** : consommation saisie une fois ; instruments contractuels
+  alloués (page Électricité), admissibles seulement avec facteur, source,
+  justificatif et critères de qualité 1 à 5 (GHG Protocol Scope 2, tableau
+  7.1). Volume restant au facteur réseau, absence de mix résiduel signalée.
+  Location-based et market-based jamais additionnés.
+- **Scope 3** : saisie par catégorie (achats physiques ou ratio kMAD justifié,
+  immobilisations sans amortissement, fret t.km, déchets, pertes réseau).
+  L'ancien ratio sectoriel global est isolé (`/scope3/estimate` répond 410).
+- **Périmètre, année de référence** (seuil choisi par l'entreprise, effet
+  cumulé, décisions conservées), **contrôle interne** par donnée, **avis
+  externes** liés à une empreinte de l'inventaire, **couverture** déclarative
+  des sources : page Méthodologie.
+- **Coût carbone** : simulation à hypothèses explicites ; aucun régime de taxe
+  marocain confirmé dans un texte officiel au 2026-11-18.
+- **CBAM** : installations, procédés, code NC, production, rattachement
+  explicite des données ; calcul uniquement pour les biens simples (page
+  CBAM — procédés). Références : règlements 2023/956 (modifié par 2025/2083),
+  2025/2547, 2025/2546, 2025/2551 (délégué), 2025/2621 corrigé par 2026/1740 ;
+  2023/1773 = période transitoire.
+
+### Corrections après relecture (2026-11-19)
+
+Huit défauts signalés en relecture, corrigés, chacun couvert par un test qui
+reproduit le scénario (`server/tests/review-fixes.test.js`) :
+1. l'ancienne estimation Scope 3 par ratio sectoriel est exclue de tous les
+   totaux et agrégats (affichée à part) ;
+2. CBAM : seules les données du site de l'installation peuvent être
+   rattachées ; électricité (NC 2716) et codes hors annexe I non calculés ;
+   procédés repris dans les exports CSV, Excel et PDF ;
+3. l'empreinte de l'inventaire inclut le périmètre organisationnel ;
+4. critères de qualité Scope 2 n° 6 (taux / contrat fournisseur) et n° 7
+   (achat direct) contrôlés selon le type d'instrument ;
+5. contrôle d'allocation des instruments consommation par consommation, au
+   prorata ;
+6. simulation de coût carbone : « non calculable » sans données, « partiel »
+   si un scope manque — jamais 0 ;
+7. le total Scope 1 + 2 + 3 n'est jamais présenté comme « Réel » ;
+8. recalcul de l'année de référence réellement versionné
+   (`base_year_inventory_versions`), y compris via un facteur correctif
+   (`emission_factors.corrects_factor_id`) ; les résultats enregistrés ne
+   changent jamais, la comparaison utilise la dernière version.
+
+### Seconde relecture (2026-11-19)
+
+- Les champs ajoutés après coup sont dans une migration séparée et idempotente,
+  1738000012000_methodology_review_fixes.sql : une base où la migration 11 a
+  déjà tourné est mise à jour sans erreur.
+- Un recalcul de l'année de référence dont une ligne n'est plus calculable est
+  refusé (409) : la référence ne peut pas baisser pour cette raison.
+- Le recalcul applique le périmètre enregistré : un site exclu ne compte plus.
+- Une version recalculée de l'année de référence modifie l'empreinte de
+  l'inventaire : un avis externe antérieur n'est plus présenté comme applicable.
+Tests : server/tests/review-fixes-2.test.js.
+
+### Troisième relecture (2026-11-19)
+
+- Migration complémentaire 1738000013000 : ajoute excluded_site_ids (et
+  partial_exclusions) si la table des versions existe déjà sans elles.
+- Seul un élément de périmètre de type site déclaré exclu retire les données
+  du site ; une exclusion d'équipement, d'opération ou d'actif loué est
+  signalée, jamais étendue au site. Un site déclaré à la fois inclus et exclu
+  bloque la validation.
+- La validation d'un recalcul est contrôlée dans la transaction (lecture
+  répétable) : la version enregistrée est exactement celle qui a été contrôlée.

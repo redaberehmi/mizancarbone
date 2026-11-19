@@ -56,7 +56,11 @@ export async function parseAndValidateImport(buffer, companyId) {
 
   const [sites, factors] = await Promise.all([siteIdsForCompany(companyId), listAvailableFactors()]);
   const siteByName = new Map(sites.map((s) => [s.name.trim().toLowerCase(), s.id]));
-  const factorByCode = new Map(factors.map((f) => [f.code, f]));
+  // L'import tabulaire ne couvre que les données Scope 1 / Scope 2 en
+  // quantité directe ; les achats, le fret et les déchets (Scope 3) exigent
+  // des champs spécifiques (montant, masse × distance, justification) et se
+  // saisissent dans l'écran dédié.
+  const factorByCode = new Map(factors.filter((f) => f.scope !== 3).map((f) => [f.code, f]));
 
   const errors = [];
   const validRows = [];

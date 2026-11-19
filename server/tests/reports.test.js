@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { app, resetDatabase, closeDatabase } from './helpers/testApp.js';
+import { addTestScope3Purchase, removeTestScope3Purchases } from './helpers/scope3.js';
 import { pool } from '../src/config/db.js';
 
 const company = {
@@ -52,17 +53,7 @@ describe('GET /api/reports/export.csv', () => {
       siteId, periodStart: '2024-01-01', periodEnd: '2024-01-31', materialLabel: 'Ferraille', quantity: 12, supplier: 'Sonasid',
     });
 
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 10, 'Test rate', '2024-01-01')`,
-    );
-    await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000,
-    });
+    await addTestScope3Purchase(agent, { periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000 });
 
     const res = await agent.get('/api/reports/export.csv');
     expect(res.status).toBe(200);
@@ -80,9 +71,7 @@ describe('GET /api/reports/export.csv', () => {
     expect(natures).toContain('scope3_estimation');
     expect(lines).toHaveLength(4); // header + 3 lignes
 
-    await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
-    await pool.query(`DELETE FROM emission_factors WHERE source = 'Test ADEME'`);
-    await pool.query(`DELETE FROM exchange_rates WHERE source = 'Test rate'`);
+    await removeTestScope3Purchases();
   });
 
   it('laisse tco2e vide (jamais "0") pour une matière première non calculée', async () => {
@@ -150,7 +139,7 @@ describe('GET /api/reports/export.xlsx', () => {
 
     const workbook = await loadWorkbook();
     expect(workbook.worksheets.map((s) => s.name)).toEqual([
-      'Informations', 'Synthèse par scope', 'Par site', 'Par période', 'Par produit', 'Données brutes', 'Facteurs utilisés',
+      'Informations', 'Synthèse par scope', 'Scope 1 et 3 par poste', 'Par site', 'Par période', 'Par produit', 'Données brutes', 'Facteurs utilisés',
     ]);
 
     const info = workbook.getWorksheet('Informations');
@@ -161,7 +150,7 @@ describe('GET /api/reports/export.xlsx', () => {
     const synthese = sheetRows(workbook.getWorksheet('Synthèse par scope'));
     const scope1 = synthese.find((r) => r.Poste === 'Scope 1');
     expect(scope1.tCO2e).toBeCloseTo(0.268, 6);
-    const scope3 = synthese.find((r) => r.Poste === 'Scope 3 — estimation');
+    const scope3 = synthese.find((r) => r.Poste === 'Scope 3 — catégories renseignées (partiel)');
     expect(scope3.tCO2e).toBeNull();
     expect(scope3.Statut).toBe('Manquant');
 
@@ -273,17 +262,7 @@ describe('Statut des données (0 réel / non calculé / manquant / estimé) — 
   });
 
   it('marque le Scope 3 "estimé" une fois calculé, jamais confondu avec un calcul direct réel', async () => {
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 10, 'Test rate', '2024-01-01')`,
-    );
-    await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000,
-    });
+    await addTestScope3Purchase(agent, { periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 100000 });
 
     const companyRes = await agent.get('/api/companies/me');
     const { buildReportHtml } = await import('../src/modules/reports/reports.service.js');
@@ -291,9 +270,7 @@ describe('Statut des données (0 réel / non calculé / manquant / estimé) — 
 
     expect(html).toMatch(/data-status="estime"/);
 
-    await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
-    await pool.query(`DELETE FROM emission_factors WHERE source = 'Test ADEME'`);
-    await pool.query(`DELETE FROM exchange_rates WHERE source = 'Test rate'`);
+    await removeTestScope3Purchases();
   });
 
   it('marque le total tCO2e "partiel" dès qu\'un des postes qui le composent est manquant ou non calculé, jamais un total qui a l\'air complet', async () => {

@@ -100,16 +100,18 @@ function ProportionBar({ segments }) {
   );
 }
 
+// Statuts de CONTRÔLE INTERNE (aucune vérification par un tiers n'est
+// réalisée par l'outil — voir Méthodologie > Vérification externe).
 const VERIFICATION_LABELS = {
-  non_verifie: 'Non vérifié',
-  partiellement_verifie: 'Partiellement vérifié',
-  totalement_verifie: 'Totalement vérifié',
+  non_controle: 'Non contrôlé',
+  controle_interne_partiel: 'Anomalie signalée au contrôle interne',
+  controle_interne_effectue: 'Contrôle interne effectué',
 };
 
 const VERIFICATION_COLORS = {
-  non_verifie: COLOR_GRIS,
-  partiellement_verifie: COLOR_VERT_ATTENUE,
-  totalement_verifie: COLOR_VERT,
+  non_controle: COLOR_GRIS,
+  controle_interne_partiel: COLOR_VERT_ATTENUE,
+  controle_interne_effectue: COLOR_VERT,
 };
 
 function yearlyComparisonMessage(reason) {
@@ -194,7 +196,7 @@ export function Dashboard() {
     : null;
 
   const totalCalculated = summary.scope1Tco2e + summary.scope2LocationBasedTco2e;
-  const { yearlyComparison, carbonIntensity, taxSimulation, topContributors, quality, completeness, alerts } = analytics;
+  const { yearlyComparison, carbonIntensity, taxSimulation, topContributors, quality, completeness, alerts, sectorComparison, comparabilityNotes } = analytics;
 
   return (
     <div className="space-y-5">
@@ -259,17 +261,27 @@ export function Dashboard() {
           sub="Scope 1+2 uniquement — Scope 3 exclu"
         />
         <StatTile
-          label="Taxe carbone estimée"
+          label="Simulation de coût carbone"
           value={taxSimulation.available ? formatMad(taxSimulation.estimatedTaxMad) : null}
-          unit={taxSimulation.available ? 'MAD · indicatif' : null}
-          unavailable={!taxSimulation.available ? 'Paramètres non encore configurés.' : null}
+          unit={taxSimulation.available ? 'MAD · hypothèse' : null}
+          unavailable={!taxSimulation.available ? 'Aucun régime de taxe carbone confirmé : simulez un coût dans « Financements & coût carbone ».' : null}
         />
+      </div>
+
+      <div className="card text-sm space-y-1">
+        <p>
+          <span className="label-field inline">Comparaison sectorielle : </span>
+          {sectorComparison?.available
+            ? `référence ${sectorComparison.reference.source} (${sectorComparison.reference.reference_year}, ${sectorComparison.reference.territory}, ${sectorComparison.reference.perimeter}, échantillon : ${sectorComparison.reference.sample_description}) : ${sectorComparison.reference.intensity_tco2e_per_mdh} ${sectorComparison.reference.unit}`
+            : <span className="text-mizan-gris">{sectorComparison?.label ?? 'Comparaison indisponible'} — {sectorComparison?.reason}</span>}
+        </p>
+        {(comparabilityNotes ?? []).slice(0, 1).map((n, i) => <p key={i} className="text-mizan-alerte text-xs">{n.message}</p>)}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
       <ChartCard
         title="Répartition par scope"
-        note="Scope 3 (teinte atténuée) est une estimation spend-based — incertitude 30–80%, jamais présentée avec le même niveau de confiance que le Scope 1/2, calculés à partir de données d'activité physiques. Le Scope 2 market-based reste identique au location-based tant qu'aucun contrat d'électricité spécifique n'est renseigné."
+        note="Scope 3 (teinte atténuée) : estimation partielle, limitée aux catégories renseignées, avec l'incertitude propre à chaque facteur. Le Scope 2 market-based est calculé à partir des instruments contractuels admissibles (page Électricité) ; il n'est jamais additionné au location-based."
       >
         <div style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
@@ -357,7 +369,7 @@ export function Dashboard() {
             )}
           </div>
           <div>
-            <p className="label-field mb-2">Statut de vérification</p>
+            <p className="label-field mb-2">Statut de contrôle interne</p>
             {quality.verificationBreakdown.length === 0 ? (
               <p className="text-sm text-mizan-gris">Non disponible.</p>
             ) : (

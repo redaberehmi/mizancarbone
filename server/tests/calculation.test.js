@@ -267,144 +267,23 @@ describe('Sélection du facteur selon la période (pas seulement "valid_to IS NU
   });
 });
 
-describe('Scope 3 — readiness', () => {
-  it("indique le ratio et le taux indisponibles par défaut (placeholders inactifs, aucune donnée inventée)", async () => {
+describe('Scope 3 — ancienne méthode du ratio sectoriel global (isolée)', () => {
+  it("n'est plus proposée : la readiness l'indique explicitement, sans valeur inventée", async () => {
     const res = await agent.get('/api/calculations/scope3/readiness');
     expect(res.status).toBe(200);
     expect(res.body.sector).toBe('metallurgie');
-    expect(res.body.sectorRatioAvailable).toBe(false);
-    expect(res.body.exchangeRateAvailable).toBe(false);
-    expect(res.body.nafMapping.naf_code_reference).toBe('24');
-    expect(res.body.uncertainty.minPercent).toBe(30);
-    expect(res.body.uncertainty.maxPercent).toBe(80);
-  });
-});
-
-describe('POST /api/calculations/scope3/estimate', () => {
-  afterEach(async () => {
-    // Ces tests insèrent des lignes de référence (emission_factors,
-    // exchange_rates) hors du cycle normal de resetDatabase (qui ne touche
-    // pas ces tables partagées) — on les retire pour ne pas polluer les
-    // autres fichiers de test qui tournent dans la même base. On supprime
-    // d'abord les activity_entries qui référencent le facteur de test : ça
-    // fait tomber en cascade l'emission_results associé (ON DELETE CASCADE),
-    // sinon la suppression du facteur échouerait sur la contrainte FK.
-    await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
-    await pool.query(`DELETE FROM emission_factors WHERE source LIKE 'Test%'`);
-    await pool.query(`DELETE FROM exchange_rates WHERE source LIKE 'Test%'`);
+    expect(res.body.method).toBe('achats_par_categorie');
+    expect(res.body.legacySectorRatio.available).toBe(false);
   });
 
-  it('refuse le calcul tant que le ratio et le taux ne sont pas configurés (422, jamais de valeur inventée)', async () => {
+  it("refuse l'estimation par ratio sectoriel (410) avec un message qui oriente vers les achats par catégorie", async () => {
     const res = await agent.post('/api/calculations/scope3/estimate').send({
       periodStart: '2024-01-01',
       periodEnd: '2024-12-31',
       amountMad: 100000,
     });
-    expect(res.status).toBe(422);
-  });
-
-  it('calcule correctement une fois le ratio et le taux réellement configurés', async () => {
-    // Simule l'activation d'un secteur : l'utilisateur a consulté la Base
-    // Empreinte ADEME et ajoute la vraie valeur (même geste que documenté
-    // dans le seed : nouvelle ligne, valid_from=aujourd'hui, valid_to=NULL).
-    // valid_from doit couvrir le début de la période demandée ci-dessous
-    // (2024-01-01) — la sélection du facteur est maintenant période-aware.
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio réel test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 10, 'Test Bank Al-Maghrib', '2024-01-01')`,
-    );
-
-    const readiness = await agent.get('/api/calculations/scope3/readiness');
-    expect(readiness.body.sectorRatioAvailable).toBe(true);
-    expect(readiness.body.exchangeRateAvailable).toBe(true);
-
-    // 100000 MAD / 10 (MAD par EUR) = 10000 EUR = 10 k€ ; 10 k€ × 200 kgCO2e/k€ / 1000 = 2 tCO2e
-    const res = await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-01-01',
-      periodEnd: '2024-12-31',
-      amountMad: 100000,
-    });
-    expect(res.status).toBe(201);
-    expect(res.body.result.tco2e).toBeCloseTo(2, 6);
-    expect(res.body.result.amountKeur).toBeCloseTo(10, 6);
-    expect(res.body.result.uncertainty.minPercent).toBe(30);
-
-    const summary = await agent.get('/api/calculations/summary');
-    expect(summary.body.scope3Tco2e).toBeCloseTo(2, 6);
-    expect(summary.body.scope3Uncertainty).not.toBeNull();
-
-    const list = await agent.get('/api/calculations/scope3');
-    expect(list.body.estimates).toHaveLength(1);
-    expect(Number(list.body.estimates[0].tco2e)).toBeCloseTo(2, 6);
-  });
-
-  it('une estimation sur une période passée utilise le ratio ET le taux qui étaient valides à cette période, pas les plus récents', async () => {
-    // Version "ancienne", valide seulement sur S1 2024.
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from, valid_to)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test v1', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME v1', false, 'MA', '2024-01-01', '2024-06-30')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from, valid_to)
-       VALUES ('EUR', 'MAD', 10, 'Test rate v1', '2024-01-01', '2024-06-30')`,
-    );
-    // Version "nouvelle", courante depuis juillet 2024 — des valeurs très
-    // différentes pour que le test échoue franchement si la mauvaise
-    // version est sélectionnée.
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test v2', 3, 'scope3_ratio', 'k€', 999, 'Test ADEME v2', false, 'MA', '2024-07-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 999, 'Test rate v2', '2024-07-01')`,
-    );
-
-    // Estimation portant sur février 2024 (S1) : doit utiliser v1 (ratio 200, taux 10).
-    const res = await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-02-01',
-      periodEnd: '2024-02-29',
-      amountMad: 100000,
-    });
-    expect(res.status).toBe(201);
-    // 100000 / 10 = 10000 EUR = 10 k€ ; 10 × 200 / 1000 = 2 tCO2e (v1, pas v2)
-    expect(res.body.result.tco2e).toBeCloseTo(2, 6);
-    expect(res.body.result.rateUsed.rate).toBe(10);
-    expect(res.body.result.ratioUsed.valueKgco2ePerKeur).toBe(200);
-  });
-
-  it("refuse (422) une estimation dont la période traverse un changement de version du ratio et/ou du taux, avec un message qui dit de scinder", async () => {
-    // Mêmes deux versions contiguës que le test précédent (S1 vs à partir
-    // de juillet), mais cette fois la période demandée chevauche les deux.
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from, valid_to)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test v1', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME v1', false, 'MA', '2024-01-01', '2024-06-30')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from, valid_to)
-       VALUES ('EUR', 'MAD', 10, 'Test rate v1', '2024-01-01', '2024-06-30')`,
-    );
-    await pool.query(
-      `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-       VALUES ('scope3_ratio_metallurgie', 'Ratio test v2', 3, 'scope3_ratio', 'k€', 999, 'Test ADEME v2', false, 'MA', '2024-07-01')`,
-    );
-    await pool.query(
-      `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-       VALUES ('EUR', 'MAD', 999, 'Test rate v2', '2024-07-01')`,
-    );
-
-    const res = await agent.post('/api/calculations/scope3/estimate').send({
-      periodStart: '2024-06-15',
-      periodEnd: '2024-07-15',
-      amountMad: 100000,
-    });
-    expect(res.status).toBe(422);
-    expect(res.body.error).toMatch(/change de version/i);
-    expect(res.body.error).toMatch(/scindez/i);
+    expect(res.status).toBe(410);
+    expect(res.body.error).toMatch(/par catégorie/);
   });
 });
 

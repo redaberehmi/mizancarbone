@@ -53,4 +53,13 @@ export const FORBIDDEN_PHRASES = [
   'registre européen',
   'registre europeen',
   'submit to the registry',
+  // Révision méthodologique 2026-11 : l'outil ne vérifie rien et ne promet
+  // aucune conformité ; une simulation de coût n'est pas une taxe due.
+  'prêt pour vérification',
+  'pret pour verification',
+  'totalement vérifié',
+  'partiellement vérifié',
+  'conformité totale',
+  'taxe due',
+  'montant réglementaire',
 ];

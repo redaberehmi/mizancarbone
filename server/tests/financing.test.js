@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { app, resetDatabase, closeDatabase } from './helpers/testApp.js';
+import { addTestScope3Purchase, removeTestScope3Purchases } from './helpers/scope3.js';
 import { pool } from '../src/config/db.js';
 import { computeCompanySizeCategory } from '../src/modules/financing/financing.service.js';
 
@@ -312,7 +313,11 @@ describe('GET /api/financing/programs — éligibilité automatique (Module 7)',
     expect(pact.components.some((c) => c.label.toLowerCase().includes('bilan carbone'))).toBe(false);
 
     const bilanRule = pact.rules.find((r) => r.rule_key === 'bilan_carbone_named_service');
-    expect(bilanRule.status).toBe('a_confirmer');
+    // Mise à jour du 2026-11-18 : la page officielle Maroc PME cite le bilan
+    // carbone et le plan de décarbonation ; aucune composante distincte
+    // « bilan carbone » n'est pour autant créée.
+    expect(bilanRule.status).toBe('confirme');
+    expect(bilanRule.primary_source).toMatch(/marocpme\.gov\.ma/);
     expect(bilanRule.verified_by).toBe('claude_code');
   });
 });
@@ -488,17 +493,7 @@ describe('GET /api/financing/carbon-tax/simulate', () => {
     });
 
     it('le périmètre taxable peut explicitement inclure le Scope 3 si configuré ainsi (jamais exclu par défaut dans le code)', async () => {
-      await pool.query(
-        `INSERT INTO emission_factors (code, label, scope, category, unit, value_kgco2e, source, is_national, region, valid_from)
-         VALUES ('scope3_ratio_metallurgie', 'Ratio test', 3, 'scope3_ratio', 'k€', 200, 'Test ADEME', false, 'MA', '2024-01-01')`,
-      );
-      await pool.query(
-        `INSERT INTO exchange_rates (base_currency, quote_currency, rate, source, valid_from)
-         VALUES ('EUR', 'MAD', 10, 'Test rate', '2024-01-01')`,
-      );
-      await agent.post('/api/calculations/scope3/estimate').send({
-        periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 1000000,
-      }); // 100 k€ × 200 / 1000 = 20 tCO2e
+      await addTestScope3Purchase(agent, { periodStart: '2024-01-01', periodEnd: '2024-12-31', amountMad: 1000000 }); // 100 k€ × 200 / 1000 = 20 tCO2e
 
       await pool.query(
         `INSERT INTO carbon_tax_parameters (rate_per_tco2e, threshold_tco2e, taxable_scopes, source, valid_from)
@@ -509,9 +504,7 @@ describe('GET /api/financing/carbon-tax/simulate', () => {
       expect(res.body.taxableScopes).toEqual([1, 2, 3]);
       expect(res.body.totalTco2eConsidered).toBeCloseTo(20, 6);
 
-      await pool.query(`DELETE FROM activity_entries WHERE factor_code LIKE 'scope3_ratio_%'`);
-      await pool.query(`DELETE FROM emission_factors WHERE source = 'Test ADEME'`);
-      await pool.query(`DELETE FROM exchange_rates WHERE source = 'Test rate'`);
+      await removeTestScope3Purchases();
     });
   });
 });

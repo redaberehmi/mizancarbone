@@ -3,6 +3,47 @@ import { getEmissionsSummary } from '../calculation/calculation.service.js';
 import { getDataCompleteness } from './dashboard-analytics.service.js';
 import { renderBrandedHtml, htmlToPdfBuffer } from './pdf-template.js';
 import { csvEscape } from './csv-escape.js';
+import { computeInventoryFingerprint } from '../methodology/coverage.service.js';
+
+// Formulation de référence de l'outil (révision méthodologique 2026-11).
+export const TOOL_STATEMENT =
+  "Outil de collecte, de calcul et de préparation des inventaires de gaz à effet de serre, avec traçabilité des données et des hypothèses.";
+
+export const BOUNDARY_LABELS = {
+  combustion: 'Combustion seule',
+  combustion_amont: 'Combustion + amont (non décomposé)',
+  amont: 'Amont',
+  procede: 'Procédé',
+  fugitive: 'Fuite (PRG)',
+  mix_production: 'Mix de production, hors pertes réseau',
+  mix_inconnu: 'Couverture non documentée',
+  pertes_reseau: 'Pertes en ligne',
+  cycle_de_vie: 'Cycle de vie',
+  berceau_porte: 'Berceau à la porte',
+  transport_amont_combustion: 'Transport (amont + combustion)',
+  fin_de_vie: 'Fin de vie',
+  monetaire: 'Ratio monétaire',
+  non_precise: 'Non précisé par la source',
+};
+export const METHOD_STATUS_LABELS = {
+  valide_source_primaire: 'Source primaire validée',
+  a_confirmer: 'À confirmer',
+  source_secondaire: 'Source secondaire',
+  non_utilisable: 'Non utilisable',
+  retire: 'Retiré',
+};
+export const RIGHTS_LABELS = { non_applicable: 'Sans objet', a_confirmer: 'Droits de réutilisation à confirmer', confirme: 'Droits confirmés', refuse: 'Droits refusés' };
+const RELEVANCE_LABELS = { pertinente: 'Pertinente', non_pertinente: 'Non pertinente (justifiée)', a_evaluer: 'À évaluer' };
+
+function isoDate(d) {
+  if (!d) return null;
+  return d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
+}
+
+export function describeFactorProvenance(f) {
+  if (!f.source_file) return '';
+  return `${f.source_file}${f.source_sheet ? ` — ${f.source_sheet}` : ''}${f.source_cell ? ` ! ${f.source_cell}` : ''}`;
+}
 import { STATUS_LABELS, formatStatusLabel, formatTco2e, determineLineStatus } from './report-formatting.js';
 import { sectorLabel, createWorkbook, addInfoSheet, addTableSheet, workbookToBuffer, TCO2E_FORMAT } from './xlsx-helpers.js';
 
@@ -65,6 +106,7 @@ async function getAllEntriesWithResults(companyId) {
 function classifyEntry(row) {
   if (row.factor_code?.startsWith('scope3_ratio_')) return 'scope3_estimation';
   if (row.material_label !== null) return 'matiere_premiere';
+  if (row.scope === 3) return 'scope3_estimation';
   return 'energie';
 }
 
@@ -73,7 +115,7 @@ export async function buildRawDataCsvExport(companyId) {
   const headers = [
     'id', 'nature', 'site', 'periode_debut', 'periode_fin', 'description', 'quantite', 'unite',
     'fournisseur', 'produit_alloue', 'scope', 'tco2e', 'source_facteur', 'facteur_national',
-    'statut_verification', 'document_source', 'cree_le',
+    'statut_controle_interne', 'document_source', 'cree_le',
   ];
 
   const lines = [
@@ -115,7 +157,9 @@ export async function buildRawDataCsvExport(companyId) {
 // l'annexe méthodologique (brief, module 6).
 export async function getFactorsUsedByCompany(companyId) {
   const result = await pool.query(
-    `SELECT DISTINCT ef.code, ef.label, ef.scope, ef.unit, ef.value_kgco2e, ef.source, ef.is_national
+    `SELECT DISTINCT ef.id, ef.code, ef.label, ef.scope, ef.category, ef.unit, ef.value_kgco2e, ef.source, ef.is_national,
+            ef.valid_from, ef.valid_to, ef.represented_year, ef.boundary, ef.source_file, ef.source_sheet, ef.source_cell,
+            ef.uncertainty_pct, ef.usage_restrictions, ef.methodological_status, ef.rights_status, ef.gwp_reference
      FROM emission_results er
      JOIN activity_entries ae ON ae.id = er.activity_entry_id
      JOIN emission_factors ef ON ef.id = er.emission_factor_id
@@ -158,13 +202,16 @@ function statusTag(statusResult) {
 // PDF est binaire, on ne peut pas facilement y chercher du texte, alors que
 // le HTML source (ce qui est réellement injecté dans le document) l'est.
 export async function buildReportHtml(companyId) {
-  const [company, summary, factorsUsed, siteCount, periodRange] = await Promise.all([
+  const [company, summary, factorsUsed, siteCount, periodRange, assuranceRows, fingerprint] = await Promise.all([
     getCompany(companyId),
     getEmissionsSummary(companyId),
     getFactorsUsedByCompany(companyId),
     getSiteCount(companyId),
     getReportingPeriodRange(companyId),
+    pool.query('SELECT provider_name, statement_date, assurance_level, inventory_fingerprint FROM external_assurance_statements WHERE company_id = $1 ORDER BY statement_date DESC', [companyId]),
+    computeInventoryFingerprint(companyId),
   ]);
+  const assurance = assuranceRows.rows;
 
   const completeness = await getDataCompleteness(companyId, company?.reporting_frequency ?? null);
 
@@ -202,11 +249,28 @@ export async function buildReportHtml(companyId) {
     .map((f) => `
       <tr>
         <td>Scope ${f.scope}</td>
-        <td>${escapeCell(f.label)}</td>
-        <td class="mono">${formatTco2e(f.value_kgco2e, { maximumFractionDigits: 6 })} kgCO2e/${escapeCell(f.unit)}</td>
-        <td>${escapeCell(f.source)}${!f.is_national ? ' <span class="badge-generique">générique</span>' : ''}</td>
+        <td>${escapeCell(f.label)}<br><span style="font-size:9px;color:#5B6670;">Périmètre : ${escapeCell(BOUNDARY_LABELS[f.boundary] ?? 'Non renseigné')}${f.gwp_reference ? ` · PRG : ${escapeCell(f.gwp_reference)}` : ''}</span></td>
+        <td class="mono">${formatTco2e(f.value_kgco2e, { maximumFractionDigits: 6 })} kgCO2e/${escapeCell(f.unit)}${f.uncertainty_pct !== null ? `<br>± ${escapeCell(f.uncertainty_pct)} %` : ''}</td>
+        <td>Année représentée : ${escapeCell(f.represented_year ?? 'non renseignée')}<br>Utilisation retenue : ${escapeCell(isoDate(f.valid_from))} → ${escapeCell(isoDate(f.valid_to) ?? 'en cours')}</td>
+        <td>${escapeCell(f.source)}${describeFactorProvenance(f) ? `<br><span style="font-size:9px;">${escapeCell(describeFactorProvenance(f))}</span>` : ''}
+          <br><span style="font-size:9px;">${escapeCell(METHOD_STATUS_LABELS[f.methodological_status] ?? f.methodological_status)} · ${escapeCell(RIGHTS_LABELS[f.rights_status] ?? f.rights_status)}</span>
+          ${f.usage_restrictions ? `<br><span style="font-size:9px;color:#5B6670;">${escapeCell(f.usage_restrictions)}</span>` : ''}</td>
       </tr>`)
     .join('');
+
+  const scope1Rows = summary.scope1Breakdown
+    .map((b) => `<tr><td>${escapeCell(b.label)}</td><td class="mono">${scopeValueCell(b.tco2e ?? 0, b)}</td><td>${statusTag(b)}</td></tr>`)
+    .join('');
+
+  const scope3Rows = summary.scope3Breakdown
+    .filter((c) => c.entryCount > 0 || c.relevance !== 'non_pertinente')
+    .map((c) => `<tr><td>Cat. ${c.category} — ${escapeCell(c.label)}</td><td>${escapeCell(RELEVANCE_LABELS[c.relevance])}</td><td class="mono">${scopeValueCell(c.tco2e ?? 0, c)}</td><td>${statusTag(c)}</td></tr>`)
+    .join('');
+
+  const mb = summary.scope2MarketBased;
+  const assuranceHtml = assurance.length === 0
+    ? '<p>Aucun avis de vérification externe enregistré.</p>'
+    : `<ul>${assurance.map((a) => `<li>${escapeCell(a.provider_name)}, ${escapeCell(isoDate(a.statement_date))}, niveau d'assurance : ${escapeCell(a.assurance_level)} — ${a.inventory_fingerprint === fingerprint ? 'porte sur la version actuelle de l’inventaire' : '<b>porte sur une version antérieure de l’inventaire : non applicable aux chiffres ci-dessus</b>'}.</li>`).join('')}</ul>`;
 
   const summaryHtml = `
     <h2>Résumé exécutif</h2>
@@ -219,12 +283,12 @@ export async function buildReportHtml(companyId) {
       <div class="kpi-tile"><div class="kpi-label">Scope 1</div><div class="kpi-value mono">${scopeValueCell(summary.scope1Tco2e, summary.scope1Status)}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Scope 2 (location-based)</div><div class="kpi-value mono">${scopeValueCell(summary.scope2LocationBasedTco2e, summary.scope2LocationBasedStatus)}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Scope 3 (estimé)</div><div class="kpi-value mono">${scopeValueCell(summary.scope3Tco2e, summary.scope3Status)}</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Total tCO2e${totalIsPartial ? ' (partiel)' : ''}</div><div class="kpi-value mono">${totalIsPartial ? 'Partiel — voir statuts ci-dessous' : formatTco2e(totalTco2e)}</div></div>
+      <div class="kpi-tile"><div class="kpi-label">Total tCO2e (partiel)</div><div class="kpi-value mono">${totalIsPartial ? 'Partiel — voir statuts ci-dessous' : `${formatTco2e(totalTco2e)} — Scope 3 : ${summary.scope3Coverage.categoriesWithData}/15 catégories`}</div></div>
       <div class="kpi-tile"><div class="kpi-label">Taux de données disponibles</div><div class="kpi-value mono">${escapeCell(completenessLabel(completeness))}</div></div>
     </div>
     <p class="mono" style="font-size:10.5px;color:#5B6670;">
-      Périmètre organisationnel : contrôle opérationnel (l'entreprise comptabilise 100% des émissions des sites
-      qu'elle contrôle opérationnellement). Structuré selon le GHG Protocol / ISO 14064-1.
+      ${escapeCell(TOOL_STATEMENT)} Périmètre organisationnel : contrôle opérationnel (100 % des émissions des
+      opérations que l'entreprise contrôle opérationnellement, indépendamment du pourcentage de détention).
     </p>
     <div class="page-break"></div>
   `;
@@ -233,8 +297,8 @@ export async function buildReportHtml(companyId) {
     ${summaryHtml}
     <p>
       Année de référence (base year) : <span class="mono">${company?.base_year ?? 'non renseignée'}</span>.
-      Ce rapport est un outil de préparation interne — il n'a pas vocation à constituer une vérification
-      tierce accréditée (ISO 14065).
+      Ce rapport est un document de préparation interne. MizanCarbone ne réalise aucune vérification : seule une
+      vérification indépendante, par un organisme tiers, peut attester de l'inventaire.
     </p>
 
     <h2>Émissions par scope</h2>
@@ -243,11 +307,34 @@ export async function buildReportHtml(companyId) {
       <tbody>
         <tr><td>Scope 1</td><td class="mono">${scopeValueCell(summary.scope1Tco2e, summary.scope1Status)}</td><td>${statusTag(summary.scope1Status)}</td></tr>
         <tr><td>Scope 2 — location-based</td><td class="mono">${scopeValueCell(summary.scope2LocationBasedTco2e, summary.scope2LocationBasedStatus)}</td><td>${statusTag(summary.scope2LocationBasedStatus)}</td></tr>
-        <tr><td>Scope 2 — market-based</td><td class="mono">${scopeValueCell(summary.scope2MarketBasedTco2e, summary.scope2MarketBasedStatus)}${summary.scope2MarketBasedIsDefaulted ? ' (identique au location-based, par défaut)' : ''}</td><td>${statusTag(summary.scope2MarketBasedStatus)}</td></tr>
-        <tr><td>Scope 3 — estimation</td><td class="mono">${scopeValueCell(summary.scope3Tco2e, summary.scope3Status)}</td><td>${statusTag(summary.scope3Status)}</td></tr>
+        <tr><td>Scope 2 — market-based</td><td class="mono">${scopeValueCell(summary.scope2MarketBasedTco2e, summary.scope2MarketBasedStatus)}</td><td>${statusTag(summary.scope2MarketBasedStatus)}</td></tr>
+        <tr><td>Scope 3 — catégories renseignées (partiel)</td><td class="mono">${scopeValueCell(summary.scope3Tco2e, summary.scope3Status)}</td><td>${statusTag(summary.scope3Status)}</td></tr>
       </tbody>
     </table>
-    ${summary.scope3Uncertainty ? `<div class="callout">Scope 3 — estimation, incertitude ${summary.scope3Uncertainty.minPercent}–${summary.scope3Uncertainty.maxPercent}% (approche spend-based ADEME). Jamais présentée avec le même niveau de confiance que le Scope 1/2.</div>` : ''}
+    <div class="callout">Les deux résultats Scope 2 (location-based et market-based) sont présentés séparément et ne s'additionnent jamais. Le total de référence utilise le location-based.</div>
+
+    <h2>Scope 1 — détail par poste</h2>
+    <table>
+      <thead><tr><th>Poste</th><th>tCO2e</th><th>Statut</th></tr></thead>
+      <tbody>${scope1Rows}</tbody>
+    </table>
+
+    <h2>Scope 2 — market-based</h2>
+    <p>Consommation d'électricité achetée : <span class="mono">${formatTco2e(mb.consumptionKwh, { maximumFractionDigits: 0 })} kWh</span> ·
+      couverte par des instruments admissibles : <span class="mono">${formatTco2e(mb.admissibleKwh, { maximumFractionDigits: 0 })} kWh</span> ·
+      calculée avec le facteur de repli : <span class="mono">${formatTco2e(mb.fallbackKwh, { maximumFractionDigits: 0 })} kWh</span>.
+      ${mb.selfConsumptionKwh > 0 ? `Autoconsommation déclarée (hors Scope 2) : <span class="mono">${formatTco2e(mb.selfConsumptionKwh, { maximumFractionDigits: 0 })} kWh</span>. ` : ''}
+      ${mb.soldKwh > 0 ? `Électricité vendue (non déduite des émissions) : <span class="mono">${formatTco2e(mb.soldKwh, { maximumFractionDigits: 0 })} kWh</span>.` : ''}</p>
+    <div class="callout">${escapeCell(mb.fallbackNote)}</div>
+
+    <h2>Scope 3 — catégories et couverture</h2>
+    <p>Estimation partielle : ${summary.scope3Coverage.categoriesWithData} catégorie(s) sur 15 renseignée(s) ;
+      ${summary.scope3Coverage.categoriesRelevant} jugée(s) pertinente(s) par l'entreprise ; ${summary.scope3Coverage.categoriesNotRelevant} exclue(s) avec justification.
+      Ce n'est jamais un « Scope 3 complet ». L'incertitude est celle indiquée par chaque facteur (voir annexe), pas une incertitude statistique calculée.</p>
+    <table>
+      <thead><tr><th>Catégorie</th><th>Pertinence</th><th>tCO2e</th><th>Statut</th></tr></thead>
+      <tbody>${scope3Rows}</tbody>
+    </table>
 
     <h2>Répartition par site</h2>
     <table>
@@ -261,30 +348,31 @@ export async function buildReportHtml(companyId) {
       <tbody>${byPeriodRows || '<tr><td colspan="2">Aucune donnée.</td></tr>'}</tbody>
     </table>
 
-    <h2>Annexe — méthodologie et facteurs d'émission utilisés</h2>
+    <h2>Annexe — facteurs d'émission utilisés</h2>
     <p>
-      Chaque facteur ci-dessous référence sa source, comme exigé pour toute donnée utilisée dans un
-      calcul de ce rapport. Les facteurs marqués « générique » sont des valeurs internationales
-      (GHG Protocol/IEA) à remplacer par l'équivalent marocain (Outil Bilan Carbone Maroc) dès disponible.
+      Pour chaque facteur : valeur, périmètre couvert, année représentée (distincte de la période pour laquelle
+      son utilisation a été retenue), source avec fichier, feuille et cellule, statut méthodologique et statut des
+      droits de réutilisation. Un facteur ancien utilisé faute de donnée plus récente est signalé dans ses restrictions.
     </p>
     <table>
-      <thead><tr><th>Scope</th><th>Facteur</th><th>Valeur</th><th>Source</th></tr></thead>
-      <tbody>${factorsRows || '<tr><td colspan="4">Aucun facteur utilisé pour le moment.</td></tr>'}</tbody>
+      <thead><tr><th>Scope</th><th>Facteur</th><th>Valeur</th><th>Années</th><th>Source et statuts</th></tr></thead>
+      <tbody>${factorsRows || '<tr><td colspan="5">Aucun facteur utilisé pour le moment.</td></tr>'}</tbody>
     </table>
+
+    <h2>Vérification externe</h2>
+    ${assuranceHtml}
 
     <h2>Méthodologie et limites</h2>
     <p>
-      <b>Périmètre :</b> contrôle opérationnel (100% des émissions des sites contrôlés opérationnellement par
-      l'entreprise). <b>Méthode :</b> Scope 1/2 calculés ligne par ligne (quantité × facteur d'émission versionné,
-      sélectionné selon la période exacte de chaque donnée saisie) ; Scope 3 estimé globalement par une approche
-      spend-based (dépenses × ratio sectoriel ADEME Base Empreinte), jamais ligne par ligne.
-      <b>Données estimées :</b> l'intégralité du Scope 3 (voir incertitude ci-dessus) — jamais présentée avec la
-      même confiance qu'un calcul direct. <b>Données manquantes :</b> tout poste marqué « Manquant » ci-dessus
-      n'a reçu aucune saisie ; tout poste marqué « Non calculé » a des données saisies mais aucun facteur
-      d'émission disponible pour leur période exacte. <b>Limites :</b> ce rapport ne couvre que les données
-      effectivement saisies dans mizancarbone ; il ne garantit pas l'exhaustivité du périmètre réel de
-      l'entreprise. <b>Statut du rapport :</b> ce rapport est un outil de préparation interne — il n'a pas
-      vocation à constituer une vérification tierce accréditée (ISO 14065).
+      <b>Périmètre :</b> contrôle opérationnel ; les approches « part du capital » et « contrôle financier » ne sont
+      pas prises en charge. <b>Méthode :</b> chaque donnée est calculée ligne par ligne (quantité × facteur
+      d'émission versionné, sélectionné selon la période exacte de la donnée). Un facteur « combustion + amont »
+      n'est jamais utilisé pour le Scope 1. Les achats évalués par ratio monétaire (kgCO2e/kMAD) sont des
+      estimations : montant en MAD / 1000 × facteur, sans conversion de devise. <b>Données manquantes :</b> un poste
+      « Manquant » n'a reçu aucune saisie ; « Non calculé » signale une saisie sans facteur utilisable pour sa
+      période. Les postes non pris en charge par l'outil restent affichés comme tels. <b>Limites :</b> ce rapport
+      ne couvre que les données saisies ; l'exhaustivité du périmètre dépend du diagnostic réalisé par l'entreprise.
+      <b>Statut :</b> document de préparation interne, sans vérification par un tiers.
     </p>
   `;
 
@@ -303,9 +391,9 @@ export async function buildDashboardPdfExport(companyId) {
 }
 
 const NATURE_LABELS = {
-  energie: 'Énergie',
+  energie: 'Scope 1 / Scope 2',
   matiere_premiere: 'Matière première (traçabilité)',
-  scope3_estimation: 'Estimation Scope 3',
+  scope3_estimation: 'Scope 3 (estimation)',
 };
 
 // tCO2e numérique seulement quand le statut porte réellement une valeur ;
@@ -344,10 +432,13 @@ export async function buildDashboardXlsxExport(companyId) {
     ['Nombre de sites', siteCount],
     ['Taux de données disponibles', completenessLabel(completeness)],
     ['Date de génération', today],
-    ['Périmètre', 'Contrôle opérationnel (100 % des émissions des sites contrôlés opérationnellement). Structuré selon le GHG Protocol / ISO 14064-1.'],
-    ['Méthode', 'Scope 1/2 : quantité × facteur d\'émission versionné, choisi selon la période exacte de chaque donnée. Scope 3 : estimation globale spend-based (dépenses × ratio sectoriel), jamais ligne par ligne.'],
-    ['Statuts', 'Réel : calculé à partir de données saisies · Estimé : estimation Scope 3 · Non calculé : donnée saisie sans facteur applicable · Manquant : aucune donnée · À vérifier : ligne partiellement vérifiée. Une cellule tCO2e vide n\'est jamais un zéro.'],
-    ['Statut du document', 'Outil de préparation interne — ne constitue pas une vérification tierce accréditée (ISO 14065).'],
+    ['Outil', TOOL_STATEMENT],
+    ['Périmètre', 'Contrôle opérationnel (100 % des émissions des opérations contrôlées opérationnellement). Autres approches de consolidation non prises en charge.'],
+    ['Méthode', 'Quantité × facteur d\'émission versionné, choisi selon la période exacte de chaque donnée. Ratios monétaires : montant MAD / 1000 × facteur kgCO2e/kMAD, sans conversion de devise. Scope 2 location-based et market-based présentés séparément, jamais additionnés.'],
+    ['Scope 2 market-based', `${formatTco2e(summary.scope2MarketBasedTco2e)} tCO2e — ${summary.scope2MarketBased.fallbackNote}`],
+    ['Scope 3', `Estimation partielle : ${summary.scope3Coverage.categoriesWithData} catégorie(s) sur 15 renseignée(s). Jamais un Scope 3 complet.`],
+    ['Statuts', 'Réel : calculé à partir de données saisies · Estimé : estimation Scope 3 · Non calculé : donnée saisie sans facteur applicable · Manquant : aucune donnée · Contrôle interne partiel : anomalie signalée lors du contrôle interne. Une cellule tCO2e vide n\'est jamais un zéro.'],
+    ['Statut du document', 'Document de préparation interne — MizanCarbone ne réalise aucune vérification.'],
   ]);
 
   const scope12Statuses = [summary.scope1Status, summary.scope2LocationBasedStatus];
@@ -367,10 +458,39 @@ export async function buildDashboardXlsxExport(companyId) {
     [
       { poste: 'Scope 1', tco2e: scopeNumber(summary.scope1Tco2e, summary.scope1Status), status: scopeStatusLabel(summary.scope1Status), note: '' },
       { poste: 'Scope 2 — location-based', tco2e: scopeNumber(summary.scope2LocationBasedTco2e, summary.scope2LocationBasedStatus), status: scopeStatusLabel(summary.scope2LocationBasedStatus), note: '' },
-      { poste: 'Scope 2 — market-based', tco2e: scopeNumber(summary.scope2MarketBasedTco2e, summary.scope2MarketBasedStatus), status: scopeStatusLabel(summary.scope2MarketBasedStatus), note: summary.scope2MarketBasedIsDefaulted ? 'Identique au location-based (aucun contrat d\'énergie spécifique renseigné)' : '' },
-      { poste: 'Scope 3 — estimation', tco2e: scopeNumber(summary.scope3Tco2e, summary.scope3Status), status: scopeStatusLabel(summary.scope3Status), note: summary.scope3Uncertainty ? `Incertitude ${summary.scope3Uncertainty.minPercent}–${summary.scope3Uncertainty.maxPercent} %` : '' },
+      { poste: 'Scope 2 — market-based', tco2e: scopeNumber(summary.scope2MarketBasedTco2e, summary.scope2MarketBasedStatus), status: scopeStatusLabel(summary.scope2MarketBasedStatus), note: `Instruments admissibles : ${formatTco2e(summary.scope2MarketBased.admissibleKwh, { maximumFractionDigits: 0 })} kWh sur ${formatTco2e(summary.scope2MarketBased.consumptionKwh, { maximumFractionDigits: 0 })} kWh. Ne s'additionne jamais au location-based.` },
+      { poste: 'Scope 3 — catégories renseignées (partiel)', tco2e: scopeNumber(summary.scope3Tco2e, summary.scope3Status), status: scopeStatusLabel(summary.scope3Status), note: `${summary.scope3Coverage.categoriesWithData} catégorie(s) sur 15 renseignée(s) — jamais un Scope 3 complet` },
       { poste: 'Total Scope 1 + 2 (location-based)', tco2e: isPartial(scope12Statuses) ? null : total12, status: isPartial(scope12Statuses) ? 'Partiel' : 'Réel', note: 'Indicateur affiché au tableau de bord' },
-      { poste: 'Total Scope 1 + 2 + 3', tco2e: total123Partial ? null : total12 + summary.scope3Tco2e, status: total123Partial ? 'Partiel' : 'Réel', note: total123Partial ? 'Au moins un poste n\'est pas intégralement calculé — voir les statuts ci-dessus' : '' },
+      // Le Scope 3 ne couvre jamais toutes les catégories : ce total n'est
+      // jamais « Réel » ; s'il est chiffré, il porte sa couverture.
+      {
+        poste: 'Total Scope 1 + 2 + 3',
+        tco2e: total123Partial ? null : total12 + summary.scope3Tco2e,
+        status: `Partiel — Scope 3 limité à ${summary.scope3Coverage.categoriesWithData} catégorie(s) sur 15`,
+        note: total123Partial
+          ? "Au moins un poste n'est pas intégralement calculé — voir les statuts ci-dessus"
+          : `Scope 1 et 2 complets ; Scope 3 partiel (${summary.scope3Coverage.categoriesWithData}/15 catégories renseignées)`,
+      },
+    ],
+  );
+
+  addTableSheet(
+    workbook,
+    'Scope 1 et 3 par poste',
+    [
+      { header: 'Poste', key: 'poste', width: 60 },
+      { header: 'Pertinence déclarée', key: 'relevance', width: 22 },
+      { header: 'tCO2e', key: 'tco2e', width: 14, numFmt: TCO2E_FORMAT },
+      { header: 'Statut', key: 'status', width: 30 },
+    ],
+    [
+      ...summary.scope1Breakdown.map((b) => ({ poste: `Scope 1 — ${b.label}`, relevance: '', tco2e: scopeNumber(b.tco2e, b), status: scopeStatusLabel(b) })),
+      ...summary.scope3Breakdown.map((c) => ({
+        poste: `Scope 3 — cat. ${c.category} — ${c.label}`,
+        relevance: { pertinente: 'Pertinente', non_pertinente: 'Non pertinente', a_evaluer: 'À évaluer' }[c.relevance],
+        tco2e: scopeNumber(c.tco2e, c),
+        status: scopeStatusLabel(c),
+      })),
     ],
   );
 
@@ -465,16 +585,30 @@ export async function buildDashboardXlsxExport(companyId) {
       { header: 'Facteur', key: 'label', width: 45 },
       { header: 'Valeur (kgCO2e par unité)', key: 'value', width: 18, numFmt: '0.000000' },
       { header: 'Unité', key: 'unit', width: 9 },
-      { header: 'Source', key: 'source', width: 90 },
-      { header: 'Facteur national', key: 'isNational', width: 16 },
+      { header: 'Périmètre', key: 'boundary', width: 28 },
+      { header: 'Année représentée', key: 'year', width: 22 },
+      { header: 'Utilisation retenue', key: 'validity', width: 24 },
+      { header: 'Incertitude (%)', key: 'uncertainty', width: 14 },
+      { header: 'Source', key: 'source', width: 70 },
+      { header: 'Fichier / feuille / cellule', key: 'provenance', width: 60 },
+      { header: 'Statut méthodologique', key: 'methodStatus', width: 22 },
+      { header: 'Droits de réutilisation', key: 'rights', width: 30 },
+      { header: 'Restrictions d’usage', key: 'restrictions', width: 90 },
     ],
     factorsUsed.map((f) => ({
       scope: f.scope,
       label: f.label,
       value: Number(f.value_kgco2e),
       unit: f.unit,
+      boundary: BOUNDARY_LABELS[f.boundary] ?? 'Non renseigné',
+      year: f.represented_year ?? 'Non renseignée',
+      validity: `${isoDate(f.valid_from)} → ${isoDate(f.valid_to) ?? 'en cours'}`,
+      uncertainty: f.uncertainty_pct === null ? '' : Number(f.uncertainty_pct),
       source: f.source,
-      isNational: f.is_national ? 'oui' : 'non (générique)',
+      provenance: describeFactorProvenance(f),
+      methodStatus: METHOD_STATUS_LABELS[f.methodological_status] ?? f.methodological_status,
+      rights: RIGHTS_LABELS[f.rights_status] ?? f.rights_status,
+      restrictions: f.usage_restrictions ?? '',
     })),
   );
 

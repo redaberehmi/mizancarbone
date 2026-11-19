@@ -14,6 +14,9 @@ import calculationRoutes from './modules/calculation/calculation.routes.js';
 import cbamPrepRoutes from './modules/cbam-prep/cbam-prep.routes.js';
 import financingRoutes from './modules/financing/financing.routes.js';
 import reportsRoutes from './modules/reports/reports.routes.js';
+import electricityRoutes from './modules/electricity/electricity.routes.js';
+import methodologyRoutes from './modules/methodology/methodology.routes.js';
+import cbamProductionRoutes from './modules/cbam-prep/cbam-production.routes.js';
 
 export function createApp() {
   const app = express();
@@ -38,6 +41,9 @@ export function createApp() {
   app.use('/api/cbam-prep', cbamPrepRoutes);
   app.use('/api/financing', financingRoutes);
   app.use('/api/reports', reportsRoutes);
+  app.use('/api/electricity', electricityRoutes);
+  app.use('/api/methodology', methodologyRoutes);
+  app.use('/api/cbam', cbamProductionRoutes);
 
   // Sert le build React (client/dist) depuis le même serveur/la même origine
   // que l'API — évite tout problème de cookie tiers (SameSite) qui

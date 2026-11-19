@@ -122,7 +122,7 @@ export function CalculationResults() {
       <PageHeader
         icon={IconCalculator}
         title="Calcul des émissions"
-        subtitle="Périmètre organisationnel : contrôle opérationnel. Structuré selon le GHG Protocol."
+        subtitle="Périmètre organisationnel : contrôle opérationnel. Chaque résultat est calculé ligne par ligne avec un facteur versionné et sourcé."
         actions={
           <button onClick={handleRun} disabled={running} className="btn-secondary">
             {running ? 'Calcul…' : 'Recalculer Scope 1 & 2'}
@@ -152,13 +152,13 @@ export function CalculationResults() {
           <ScopeValue
             value={summary.scope2MarketBasedTco2e}
             status={summary.scope2MarketBasedStatus}
-            note={summary.scope2MarketBasedIsDefaulted ? 'identique au location-based (aucun contrat d\'énergie spécifique renseigné)' : null}
+            note={summary.scope2MarketBasedIsDefaulted ? 'aucun instrument admissible : facteur réseau utilisé faute de mix résiduel (voir page Électricité)' : 'instruments contractuels admissibles appliqués (voir page Électricité)'}
           />
         </div>
       </div>
 
       <div className="card border-mizan-alerte/30">
-        <p className="label-field">Scope 3 — estimation (approche spend-based)</p>
+        <p className="label-field">Scope 3 — catégories renseignées (estimation partielle)</p>
         <ScopeValue value={summary.scope3Tco2e} status={summary.scope3Status} missingLabel="Non estimé" large />
         {summary.scope3Uncertainty && (
           <p className="text-sm text-mizan-alerte mt-1">
@@ -252,98 +252,50 @@ export function CalculationResults() {
       </div>
 
       <div className="card">
-        <SectionHeader icon={IconTrendingUp} title={`Estimation Scope 3 — secteur ${SECTOR_LABELS[readiness.sector] ?? readiness.sector}`} />
+        <SectionHeader icon={IconTrendingUp} title="Scope 1 — détail par poste" />
+        <table className="w-full text-sm">
+          <tbody>
+            {summary.scope1Breakdown.map((b) => (
+              <tr key={b.category} className="row-bi border-b border-mizan-menthe/60">
+                <td className="py-2 pr-3">{b.label}</td>
+                <td className="py-2 font-data">{b.tco2e === null ? (b.status === 'non_calcule' ? 'Non calculé' : 'Manquant') : formatTco2e(b.tco2e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <SectionHeader icon={IconTrendingUp} title="Scope 3 — catégories et couverture" />
         <p className="text-sm text-mizan-gris mb-4 -mt-2">
-          Chiffre d'affaires ou valeur des achats × ratio sectoriel (ADEME Base Empreinte, kgCO2e/k€) —
-          approche spend-based du GHG Protocol. Estimation globale, pas un calcul ligne par ligne.
+          Estimation partielle : {summary.scope3Coverage.categoriesWithData} catégorie(s) sur 15 renseignée(s). Les
+          achats se saisissent par catégorie dans « Collecte de données », avec un facteur adapté (quantité physique
+          ou ratio monétaire justifié). La pertinence de chaque catégorie se déclare dans « Méthodologie ».
         </p>
-
-        {readiness.nafMapping && (
-          <p className="text-xs text-mizan-gris mb-4 font-data">
-            Code NAF de référence : {readiness.nafMapping.naf_code_reference} — {readiness.nafMapping.naf_label}
-          </p>
-        )}
-
-        {(!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable) && (
-          <div className="rounded-lg border border-mizan-alerte/30 bg-mizan-alerte/5 p-3 mb-4">
-            <p className="text-sm text-mizan-alerte font-medium">Estimation indisponible pour le moment :</p>
-            <ul className="text-sm text-mizan-alerte list-disc list-inside">
-              {!readiness.sectorRatioAvailable && (
-                <li>Ratio monétaire ADEME Base Empreinte non encore renseigné pour ce secteur.</li>
-              )}
-              {!readiness.exchangeRateAvailable && <li>Taux de change EUR/MAD non configuré.</li>}
-            </ul>
-          </div>
-        )}
-
-        <form onSubmit={handleEstimateSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label-field">Début de période</label>
-              <IconInput
-                icon={IconCalendar}
-                type="date"
-                required
-                disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-                className="font-data"
-                value={form.periodStart}
-                onChange={(e) => setForm({ ...form, periodStart: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="label-field">Fin de période</label>
-              <IconInput
-                icon={IconCalendar}
-                type="date"
-                required
-                disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-                className="font-data"
-                value={form.periodEnd}
-                onChange={(e) => setForm({ ...form, periodEnd: e.target.value })}
-              />
-            </div>
-          </div>
-          <div>
-            <label className="label-field">Chiffre d'affaires ou valeur des achats (MAD)</label>
-            <IconInput
-              icon={IconCoins}
-              type="number"
-              step="any"
-              min="0"
-              required
-              disabled={!readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-              className="font-data"
-              value={form.amountMad}
-              onChange={(e) => setForm({ ...form, amountMad: e.target.value })}
-            />
-          </div>
-          {estimateError && <p className="text-sm text-mizan-alerte">{estimateError}</p>}
-          <button
-            type="submit"
-            disabled={submitting || !readiness.sectorRatioAvailable || !readiness.exchangeRateAvailable}
-            className="btn-primary"
-          >
-            {submitting ? 'Calcul…' : 'Estimer'}
-          </button>
-        </form>
-
-        {estimateResult && (
-          <div className="mt-4 rounded-lg border border-mizan-menthe bg-mizan-menthe/20 p-3">
-            <p className="font-data text-lg text-mizan-ardoise">{formatTco2e(estimateResult.tco2e)} tCO2e</p>
-            <p className="text-sm text-mizan-alerte">
-              Incertitude estimée : {estimateResult.uncertainty.minPercent}–{estimateResult.uncertainty.maxPercent}%.
-            </p>
-            <p className="text-xs text-mizan-gris mt-1 font-data">
-              {estimateResult.amountMad.toLocaleString('fr-FR')} MAD → {estimateResult.amountEur.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} EUR
-              (taux {estimateResult.rateUsed.rate}, {estimateResult.rateUsed.source})
-            </p>
-          </div>
-        )}
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">
+              <th className="py-2 pr-3">Catégorie</th>
+              <th className="py-2 pr-3">Pertinence</th>
+              <th className="py-2">tCO2e</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.scope3Breakdown.map((c) => (
+              <tr key={c.category} className="row-bi border-b border-mizan-menthe/60">
+                <td className="py-2 pr-3">{c.category} — {c.label}</td>
+                <td className="py-2 pr-3">{{ pertinente: 'Pertinente', non_pertinente: 'Non pertinente', a_evaluer: 'À évaluer' }[c.relevance]}</td>
+                <td className="py-2 font-data">{c.tco2e === null ? (c.status === 'non_calcule' ? 'Non calculé' : 'Manquant') : formatTco2e(c.tco2e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-mizan-gris mt-3">{readiness.legacySectorRatio.reason}</p>
       </div>
 
       {estimates.length > 0 && (
         <div className="card">
-          <SectionHeader icon={IconTrendingUp} title="Estimations Scope 3 précédentes" />
+          <SectionHeader icon={IconTrendingUp} title="Estimations historiques par ratio sectoriel (méthode isolée)" />
           <table className="w-full text-sm">
             <thead>
               <tr className="th-bi text-left text-mizan-gris border-b border-mizan-menthe">

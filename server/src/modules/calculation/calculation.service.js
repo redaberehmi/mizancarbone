@@ -1,8 +1,53 @@
 import { pool, withTransaction } from '../../config/db.js';
 import { AppError } from '../../middleware/errorHandler.js';
-import { DIRECT_ENTRY_CATEGORIES, RAW_MATERIAL_FACTOR_CODE } from '../activity-entries/constants.js';
-import { scope3RatioFactorCode, SCOPE3_RATIO_UNCERTAINTY } from './constants.js';
+import {
+  ALL_ENTRY_CATEGORIES,
+  RAW_MATERIAL_FACTOR_CODE,
+  SCOPE1_ALLOWED_BOUNDARIES,
+  UNUSABLE_METHOD_STATUSES,
+  SCOPE1_CATEGORY_LABELS,
+  SCOPE3_CATEGORY_LABELS,
+} from '../activity-entries/constants.js';
+import { scope3RatioFactorCode } from './constants.js';
 import { determineAggregateStatus } from '../reports/report-formatting.js';
+import { computeMarketBased } from '../electricity/market-based.service.js';
+import { getSourceRelevance } from '../methodology/coverage.service.js';
+
+export const FACTOR_COLUMNS = `id, code, label, scope, category, unit, value_kgco2e, source, is_national,
+  valid_from, valid_to, factor_uid, version_label, activity_label, gases_covered, gwp_reference, geography,
+  technology, represented_year, publication_date, integration_date, boundary, source_original, source_file,
+  source_sheet, source_cell, uncertainty_pct, usage_restrictions, validity_note, methodological_status,
+  rights_status, scope3_category, corrects_factor_id`;
+
+// Dernière correction enregistrée d'une version de facteur (chaîne suivie
+// jusqu'au bout). Réservé au recalcul de l'année de référence.
+export async function resolveCorrectedFactor(factor, client = pool) {
+  let current = factor;
+  for (let i = 0; i < 20; i += 1) {
+    const r = await client.query(
+      `SELECT ${FACTOR_COLUMNS} FROM emission_factors WHERE corrects_factor_id = $1 ORDER BY id DESC LIMIT 1`,
+      [current.id],
+    );
+    if (r.rows.length === 0) return current;
+    current = r.rows[0];
+  }
+  return current;
+}
+
+// Garde-fou méthodologique, appliqué à TOUTE production de résultat : un
+// facteur retiré / non utilisable ne calcule rien, et un facteur dont le
+// périmètre n'est pas « combustion seule », « procédé » ou « fugitif » ne
+// peut jamais produire un résultat Scope 1 (un facteur combustion + amont
+// gonflerait le Scope 1 de la part amont, qui relève du Scope 3).
+export function factorUsabilityError(factor) {
+  if (UNUSABLE_METHOD_STATUSES.includes(factor.methodological_status)) {
+    return `Le facteur « ${factor.label} » est marqué « ${factor.methodological_status === 'retire' ? 'retiré' : 'non utilisable'} » dans le registre : ${factor.usage_restrictions ?? 'voir le registre des facteurs.'}`;
+  }
+  if (factor.scope === 1 && factor.boundary && !SCOPE1_ALLOWED_BOUNDARIES.includes(factor.boundary)) {
+    return `Le facteur « ${factor.label} » couvre le périmètre « ${factor.boundary} » : il ne permet pas de calculer des émissions Scope 1 (combustion seule, procédé ou fuite requis). Aucune répartition n'est estimée à sa place.`;
+  }
+  return null;
+}
 
 // Sélectionne la version du facteur valide PENDANT toute la période donnée
 // (period_start/period_end de l'entrée ou de l'estimation Scope 3) — jamais
@@ -10,9 +55,9 @@ import { determineAggregateStatus } from '../reports/report-formatting.js';
 // portant sur une période passée doit utiliser le facteur qui était en
 // vigueur à cette période-là, même si une version plus récente existe
 // depuis : c'est le principe même d'une table de facteurs versionnée.
-async function getFactorForPeriod(code, categories, periodStart, periodEnd) {
-  const result = await pool.query(
-    `SELECT id, code, label, scope, category, unit, value_kgco2e, source, is_national
+export async function getFactorForPeriod(code, categories, periodStart, periodEnd, client = pool) {
+  const result = await client.query(
+    `SELECT ${FACTOR_COLUMNS}
      FROM emission_factors
      WHERE code = $1 AND category = ANY($2)
        AND valid_from <= $3
@@ -102,7 +147,11 @@ async function explainMissingExchangeRate(periodStart, periodEnd) {
 // message générique. Utilisé par la saisie Module 2 et l'estimation Scope 3.
 export async function getFactorForPeriodOrExplain(code, categories, periodStart, periodEnd) {
   const factor = await getFactorForPeriod(code, categories, periodStart, periodEnd);
-  if (factor) return { factor, error: null };
+  if (factor) {
+    const usabilityError = factorUsabilityError(factor);
+    if (usabilityError) return { factor: null, error: usabilityError };
+    return { factor, error: null };
+  }
   return { factor: null, error: await explainMissingFactor(code, categories, periodStart, periodEnd) };
 }
 
@@ -126,16 +175,16 @@ async function getCompanySector(companyId) {
   return result.rows[0].sector;
 }
 
+
 // ============================================================
-// Scope 1 & 2 — calcul batch, idempotent : ne calcule que les entrées qui
-// n'ont pas encore de résultat. Ne recalcule jamais un résultat existant
-// (exigence section 5 : "jamais un recalcul silencieux si le facteur
-// change" — un résultat déjà produit référence la version exacte du facteur
-// utilisée à ce moment-là, immuable).
+// Calcul batch, idempotent : ne calcule que les entrées qui n'ont pas encore
+// de résultat. Ne recalcule jamais un résultat existant ("jamais un recalcul
+// silencieux si le facteur change") : un résultat déjà produit référence la
+// version exacte du facteur utilisée à ce moment-là, immuable.
 // ============================================================
 export async function runScopeOneTwoCalculation(companyId) {
   const pending = await pool.query(
-    `SELECT ae.id, ae.factor_code, ae.quantity, ae.period_start, ae.period_end
+    `SELECT ae.id, ae.factor_code, ae.quantity, ae.period_start, ae.period_end, ae.scope3_category
      FROM activity_entries ae
      LEFT JOIN emission_results er ON er.activity_entry_id = ae.id
      WHERE ae.company_id = $1
@@ -148,77 +197,75 @@ export async function runScopeOneTwoCalculation(companyId) {
 
   let calculated = 0;
   let skippedNoFactor = 0;
+  let skippedUnusableFactor = 0;
 
   for (const entry of pending.rows) {
-    const factor = await getFactorForPeriod(
-      entry.factor_code,
-      DIRECT_ENTRY_CATEGORIES,
-      entry.period_start,
-      entry.period_end,
-    );
+    const factor = await getFactorForPeriod(entry.factor_code, ALL_ENTRY_CATEGORIES, entry.period_start, entry.period_end);
     if (!factor) {
       skippedNoFactor += 1;
       continue;
     }
-    const tco2e = (Number(entry.quantity) * Number(factor.value_kgco2e)) / 1000;
-    await pool.query(
-      `INSERT INTO emission_results (activity_entry_id, emission_factor_id, scope, tco2e)
-       VALUES ($1, $2, $3, $4)`,
-      [entry.id, factor.id, factor.scope, tco2e],
-    );
+    if (factorUsabilityError(factor)) {
+      skippedUnusableFactor += 1;
+      continue;
+    }
+    await insertResult(pool, entry.id, factor, Number(entry.quantity));
     calculated += 1;
   }
 
-  return { calculated, skippedNoFactor, pending: pending.rows.length };
+  return { calculated, skippedNoFactor, skippedUnusableFactor, pending: pending.rows.length };
 }
 
-// Appelé juste après la création d'une entrée énergie (Module 2) pour que le
-// résultat soit visible immédiatement, sans attendre un recalcul manuel.
-export async function computeResultForEnergyEntry(entryId, factor) {
-  const already = await pool.query('SELECT id FROM emission_results WHERE activity_entry_id = $1', [entryId]);
-  if (already.rows.length > 0) return;
+// tCO2e = quantité (dans l'unité du facteur) × facteur (kgCO2e/unité) / 1000.
+// Pour un facteur en kgCO2e/kMAD, la quantité est déjà exprimée en kMAD
+// (montant MAD / 1000) : aucune conversion de devise n'est appliquée.
+export function computeTco2e(quantity, factorValueKg) {
+  return (Number(quantity) * Number(factorValueKg)) / 1000;
+}
 
-  const entry = await pool.query('SELECT quantity FROM activity_entries WHERE id = $1', [entryId]);
-  const tco2e = (Number(entry.rows[0].quantity) * Number(factor.value_kgco2e)) / 1000;
-  await pool.query(
+async function insertResult(client, entryId, factor, quantity) {
+  const tco2e = computeTco2e(quantity, factor.value_kgco2e);
+  await client.query(
     `INSERT INTO emission_results (activity_entry_id, emission_factor_id, scope, tco2e)
      VALUES ($1, $2, $3, $4)`,
     [entryId, factor.id, factor.scope, tco2e],
   );
 }
 
+// Appelé juste après la création d'une entrée (Module 2) pour que le
+// résultat soit visible immédiatement, sans attendre un recalcul manuel.
+export async function computeResultForEnergyEntry(entryId, factor) {
+  const already = await pool.query('SELECT id FROM emission_results WHERE activity_entry_id = $1', [entryId]);
+  if (already.rows.length > 0) return;
+  const usabilityError = factorUsabilityError(factor);
+  if (usabilityError) throw new AppError(400, usabilityError);
+  const entry = await pool.query('SELECT quantity FROM activity_entries WHERE id = $1', [entryId]);
+  await insertResult(pool, entryId, factor, Number(entry.rows[0].quantity));
+}
+
 // ============================================================
-// Résumé agrégé (par scope, par site). Le Scope 2 est éclaté en
-// location-based / market-based (double reporting obligatoire, section 5) ;
-// tant qu'aucune entrée ne référence un facteur "electricite_market_based",
-// le market-based affiché est identique au location-based par défaut, comme
-// prévu par le brief ("sauf si contrat spécifique — non développé en V1").
+// Statut par poste — jamais déduit du seul booléen "a des données" : une
+// entrée saisie mais jamais calculée (facteur manquant ou inutilisable)
+// compte dans entryCount sans compter dans calculatedCount, ce qui distingue
+// "non_calcule" de "manquant". Le scope/la catégorie d'une entrée non
+// calculée est retrouvé via le catalogue emission_factors par factor_code.
 // ============================================================
-// ============================================================
-// Statut par poste (Scope 1 / Scope 2 LB / Scope 2 MB / Scope 3), utilisé
-// par les rapports pour ne jamais confondre "0 calculé" et "non calculé"
-// (voir report-formatting.js). Contrairement à la requête ci-dessus
-// (JOIN sur emission_results), celle-ci part de activity_entries et fait un
-// LEFT JOIN : une entrée saisie mais jamais calculée (facteur manquant pour
-// la période) doit compter dans entryCount sans compter dans
-// calculatedCount — c'est cette différence qui distingue "non_calcule" de
-// "manquant". Le scope/la catégorie d'une entrée non calculée est retrouvé
-// via le catalogue emission_factors par factor_code (n'importe quelle
-// version : scope/category sont stables d'une version à l'autre d'un même
-// code, seuls value_kgco2e/source changent — confirmé par le mécanisme de
-// réversionnement des facteurs).
-// ============================================================
-async function getScopeEntryClassification(companyId) {
+function emptyBucket() {
+  return { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartialInternalControl: false };
+}
+
+async function getEntryClassification(companyId) {
   const result = await pool.query(
-    `SELECT ae.id,
+    `SELECT ae.id, ae.scope3_category AS entry_scope3_category,
             er.tco2e, er.verification_status,
             COALESCE(result_ef.scope, catalog_ef.scope) AS scope,
-            COALESCE(result_ef.category, catalog_ef.category) AS category
+            COALESCE(result_ef.category, catalog_ef.category) AS category,
+            COALESCE(result_ef.scope3_category, catalog_ef.scope3_category) AS factor_scope3_category
      FROM activity_entries ae
      LEFT JOIN emission_results er ON er.activity_entry_id = ae.id
      LEFT JOIN emission_factors result_ef ON result_ef.id = er.emission_factor_id
      LEFT JOIN LATERAL (
-       SELECT scope, category FROM emission_factors ef2
+       SELECT scope, category, scope3_category FROM emission_factors ef2
        WHERE ef2.code = ae.factor_code
        ORDER BY ef2.valid_from DESC
        LIMIT 1
@@ -227,36 +274,62 @@ async function getScopeEntryClassification(companyId) {
     [companyId],
   );
 
-  const buckets = {
-    scope1: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
-    scope2LocationBased: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
-    scope2MarketBased: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
-    scope3: { entryCount: 0, calculatedCount: 0, sumTco2e: 0, hasPartiallyVerified: false },
-  };
+  const scope1 = emptyBucket();
+  const scope1ByCategory = Object.fromEntries(Object.keys(SCOPE1_CATEGORY_LABELS).map((k) => [k, emptyBucket()]));
+  const scope2LocationBased = emptyBucket();
+  const scope2LegacyMarketBased = emptyBucket();
+  const scope3 = emptyBucket();
+  const scope3ByCategory = {};
+  // Ancienne méthode du ratio sectoriel global : isolée, JAMAIS additionnée
+  // au Scope 3 par catégorie (elle couvrirait les mêmes dépenses).
+  const legacyScope3Ratio = emptyBucket();
+  let legacyScope3RatioCount = 0;
 
   for (const row of result.rows) {
-    let bucket = null;
-    if (row.scope === 1) bucket = buckets.scope1;
-    else if (row.scope === 2 && row.category === 'electricite_location_based') bucket = buckets.scope2LocationBased;
-    else if (row.scope === 2 && row.category === 'electricite_market_based') bucket = buckets.scope2MarketBased;
-    else if (row.scope === 3) bucket = buckets.scope3;
-    // scope/category encore indéterminé (facteur jamais vu, même au
-    // catalogue) : n'entre dans aucun poste, jamais compté au hasard.
-    if (!bucket) continue;
-
-    bucket.entryCount += 1;
-    if (row.tco2e !== null) {
-      bucket.calculatedCount += 1;
-      bucket.sumTco2e += Number(row.tco2e);
-      if (row.verification_status === 'partiellement_verifie') bucket.hasPartiallyVerified = true;
+    const buckets = [];
+    if (row.scope === 1) {
+      buckets.push(scope1);
+      if (scope1ByCategory[row.category]) buckets.push(scope1ByCategory[row.category]);
+    } else if (row.scope === 2 && row.category === 'electricite_location_based') {
+      buckets.push(scope2LocationBased);
+    } else if (row.scope === 2 && row.category === 'electricite_market_based') {
+      buckets.push(scope2LegacyMarketBased);
+    } else if (row.scope === 3 && row.category === 'scope3_ratio') {
+      legacyScope3RatioCount += 1;
+      buckets.push(legacyScope3Ratio);
+    } else if (row.scope === 3) {
+      buckets.push(scope3);
+      const cat = row.entry_scope3_category ?? row.factor_scope3_category ?? null;
+      const key = cat ?? 'non_classee';
+      if (!scope3ByCategory[key]) scope3ByCategory[key] = emptyBucket();
+      buckets.push(scope3ByCategory[key]);
+    }
+    // scope/catégorie indéterminés : n'entre dans aucun poste, jamais compté au hasard.
+    for (const bucket of buckets) {
+      bucket.entryCount += 1;
+      if (row.tco2e !== null) {
+        bucket.calculatedCount += 1;
+        bucket.sumTco2e += Number(row.tco2e);
+        if (row.verification_status === 'controle_interne_partiel') bucket.hasPartialInternalControl = true;
+      }
     }
   }
 
-  return buckets;
+  return { scope1, scope1ByCategory, scope2LocationBased, scope2LegacyMarketBased, scope3, scope3ByCategory, legacyScope3RatioCount, legacyScope3Ratio };
+}
+
+function statusOf(bucket, options = {}) {
+  return determineAggregateStatus({
+    entryCount: bucket.entryCount,
+    calculatedCount: bucket.calculatedCount,
+    sumTco2e: bucket.sumTco2e,
+    hasPartialInternalControl: bucket.hasPartialInternalControl,
+    ...options,
+  });
 }
 
 export async function getEmissionsSummary(companyId) {
-  const [rows, classification] = await Promise.all([
+  const [rows, classification, marketBased, relevance] = await Promise.all([
     pool.query(
       `SELECT er.scope, ef.category, ae.site_id, s.name AS site_name,
               ae.period_start, ae.period_end, ae.product_allocation, er.tco2e
@@ -267,75 +340,99 @@ export async function getEmissionsSummary(companyId) {
        WHERE ae.company_id = $1 AND ae.deleted_at IS NULL`,
       [companyId],
     ),
-    getScopeEntryClassification(companyId),
+    getEntryClassification(companyId),
+    computeMarketBased(companyId),
+    getSourceRelevance(companyId),
   ]);
 
+  // Agrégations par site / période / produit : Scope 1 + Scope 2
+  // location-based + Scope 3 calculé. Le market-based n'y entre JAMAIS
+  // (deux méthodes Scope 2 ne s'additionnent pas).
   const bySite = new Map();
   const byPeriod = new Map();
   const byProduct = new Map();
-  let scope1 = 0;
-  let scope2LocationBased = 0;
-  let scope2MarketBased = 0;
-  let scope3 = 0;
-  let hasExplicitMarketBased = false;
 
   for (const row of rows.rows) {
+    if (row.scope === 2 && row.category !== 'electricite_location_based') continue;
+    if (row.category === 'scope3_ratio') continue; // méthode isolée, hors agrégats
     const tco2e = Number(row.tco2e);
-    if (row.scope === 1) scope1 += tco2e;
-    if (row.scope === 2 && row.category === 'electricite_location_based') scope2LocationBased += tco2e;
-    if (row.scope === 2 && row.category === 'electricite_market_based') {
-      scope2MarketBased += tco2e;
-      hasExplicitMarketBased = true;
-    }
-    if (row.scope === 3) scope3 += tco2e;
 
     const siteKey = row.site_id ?? 'sans-site';
-    if (!bySite.has(siteKey)) {
-      bySite.set(siteKey, { siteId: row.site_id, siteName: row.site_name, totalTco2e: 0 });
-    }
+    if (!bySite.has(siteKey)) bySite.set(siteKey, { siteId: row.site_id, siteName: row.site_name, totalTco2e: 0 });
     bySite.get(siteKey).totalTco2e += tco2e;
 
     const periodKey = `${row.period_start}_${row.period_end}`;
-    if (!byPeriod.has(periodKey)) {
-      byPeriod.set(periodKey, { periodStart: row.period_start, periodEnd: row.period_end, totalTco2e: 0 });
-    }
+    if (!byPeriod.has(periodKey)) byPeriod.set(periodKey, { periodStart: row.period_start, periodEnd: row.period_end, totalTco2e: 0 });
     byPeriod.get(periodKey).totalTco2e += tco2e;
 
-    // "si allocation renseignée" (brief, section 5) : le Module 4 (CBAM) est
-    // le seul à écrire product_allocation pour l'instant, donc ce regroupement
-    // retombe entièrement dans le seau "non alloué" tant qu'il n'existe pas —
-    // le mécanisme est prêt, pas encore alimenté.
     const productKey = row.product_allocation ?? 'non-alloue';
-    if (!byProduct.has(productKey)) {
-      byProduct.set(productKey, { productAllocation: row.product_allocation, totalTco2e: 0 });
-    }
+    if (!byProduct.has(productKey)) byProduct.set(productKey, { productAllocation: row.product_allocation, totalTco2e: 0 });
     byProduct.get(productKey).totalTco2e += tco2e;
   }
 
-  // Statut par poste — jamais déduit du seul booléen "a des données" : un
-  // scope avec des entrées saisies mais aucun calcul possible (facteur
-  // manquant) est 'non_calcule', pas 'manquant' ; le Scope 2 market-based
-  // reprend le statut du location-based quand il est défaulté, puisque le
-  // nombre affiché est alors littéralement le même (voir
-  // scope2MarketBasedIsDefaulted déjà utilisé pour la mise en garde texte).
-  const scope1Status = determineAggregateStatus(classification.scope1);
-  const scope2LocationBasedStatus = determineAggregateStatus(classification.scope2LocationBased);
-  const scope2MarketBasedStatus = hasExplicitMarketBased
-    ? determineAggregateStatus(classification.scope2MarketBased)
-    : scope2LocationBasedStatus;
-  const scope3Status = determineAggregateStatus({ ...classification.scope3, isEstimation: true });
+  const scope1Status = statusOf(classification.scope1);
+  const scope2LocationBasedStatus = statusOf(classification.scope2LocationBased);
+  const scope3Status = statusOf(classification.scope3, { isEstimation: true });
+
+  const scope1Breakdown = Object.entries(classification.scope1ByCategory).map(([category, bucket]) => ({
+    category,
+    label: SCOPE1_CATEGORY_LABELS[category],
+    tco2e: bucket.calculatedCount > 0 ? bucket.sumTco2e : null,
+    entryCount: bucket.entryCount,
+    calculatedCount: bucket.calculatedCount,
+    ...statusOf(bucket),
+  }));
+
+  const scope3Breakdown = Object.entries(SCOPE3_CATEGORY_LABELS).map(([cat, label]) => {
+    const bucket = classification.scope3ByCategory[cat] ?? emptyBucket();
+    const rel = relevance.find((r) => r.sourceCode === `S3_C${cat}`);
+    return {
+      category: Number(cat),
+      label,
+      tco2e: bucket.calculatedCount > 0 ? bucket.sumTco2e : null,
+      relevance: rel?.status ?? 'a_evaluer',
+      relevanceJustification: rel?.justification ?? null,
+      entryCount: bucket.entryCount,
+      calculatedCount: bucket.calculatedCount,
+      ...statusOf(bucket, { isEstimation: true }),
+    };
+  });
+  const scope3Coverage = {
+    categoriesWithData: scope3Breakdown.filter((c) => c.calculatedCount > 0).length,
+    categoriesRelevant: scope3Breakdown.filter((c) => c.relevance === 'pertinente').length,
+    categoriesNotRelevant: scope3Breakdown.filter((c) => c.relevance === 'non_pertinente').length,
+    relevantMissing: scope3Breakdown
+      .filter((c) => c.relevance !== 'non_pertinente' && c.calculatedCount === 0)
+      .map((c) => ({ category: c.category, label: c.label, relevance: c.relevance })),
+    // Jamais « complet » : au mieux, toutes les catégories jugées pertinentes
+    // par l'entreprise sont renseignées.
+    isPartial: true,
+  };
 
   return {
-    scope1Tco2e: scope1,
+    scope1Tco2e: classification.scope1.sumTco2e,
     scope1Status,
-    scope2LocationBasedTco2e: scope2LocationBased,
+    scope1Breakdown,
+    scope2LocationBasedTco2e: classification.scope2LocationBased.sumTco2e,
     scope2LocationBasedStatus,
-    scope2MarketBasedTco2e: hasExplicitMarketBased ? scope2MarketBased : scope2LocationBased,
-    scope2MarketBasedIsDefaulted: !hasExplicitMarketBased,
-    scope2MarketBasedStatus,
-    scope3Tco2e: scope3,
+    scope2MarketBasedTco2e: marketBased.totalTco2e,
+    scope2MarketBasedStatus: marketBased.status,
+    scope2MarketBased: marketBased,
+    // Conservé pour compatibilité : vrai quand aucun instrument contractuel
+    // admissible n'est appliqué (market-based = facteur réseau par défaut).
+    scope2MarketBasedIsDefaulted: marketBased.admissibleKwh === 0,
+    scope3Tco2e: classification.scope3.sumTco2e,
     scope3Status,
-    scope3Uncertainty: scope3 > 0 ? SCOPE3_RATIO_UNCERTAINTY : null,
+    scope3Breakdown,
+    scope3Coverage,
+    scope3Uncertainty: null,
+    legacyScope3RatioCount: classification.legacyScope3RatioCount,
+    // Affiché à part pour information, exclu de tout total.
+    legacyScope3Ratio: {
+      entryCount: classification.legacyScope3Ratio.entryCount,
+      tco2e: classification.legacyScope3Ratio.calculatedCount > 0 ? classification.legacyScope3Ratio.sumTco2e : null,
+      note: "Estimations historiques par ratio sectoriel global : méthode isolée, exclue des totaux pour éviter un double comptage avec les achats par catégorie.",
+    },
     bySite: [...bySite.values()],
     byPeriod: [...byPeriod.values()].sort((a, b) => (a.periodStart < b.periodStart ? 1 : -1)),
     byProduct: [...byProduct.values()],
@@ -343,74 +440,30 @@ export async function getEmissionsSummary(companyId) {
 }
 
 // ============================================================
-// Scope 3 — estimation spend-based (approche GHG Protocol, ratios ADEME
-// Base Empreinte). Montant × ratio sectoriel, avec traçabilité complète du
-// taux de change utilisé.
+// Ancienne méthode « ratio sectoriel global » (ratio lié au secteur de
+// l'entreprise appliqué à toutes ses dépenses) : ISOLÉE. Les lignes de
+// ratio sont retirées du registre ; les points d'entrée restent pour lire
+// d'éventuelles estimations historiques et répondre explicitement que la
+// méthode n'est plus proposée.
 // ============================================================
 export async function getScope3Readiness(companyId) {
   const sector = await getCompanySector(companyId);
-  const today = todayIso();
-  const [ratio, rate, nafMapping] = await Promise.all([
-    getFactorForPeriod(scope3RatioFactorCode(sector), ['scope3_ratio'], today, today),
-    getExchangeRateForPeriod(today, today),
-    getSectorNafMapping(sector),
-  ]);
-
   return {
     sector,
-    sectorRatioAvailable: !!ratio,
-    exchangeRateAvailable: !!rate,
-    nafMapping,
-    uncertainty: SCOPE3_RATIO_UNCERTAINTY,
+    method: 'achats_par_categorie',
+    legacySectorRatio: {
+      code: scope3RatioFactorCode(sector),
+      available: false,
+      reason: "Méthode du ratio sectoriel global isolée : le Scope 3 se saisit par catégorie d'achat, avec un facteur choisi et justifié ligne par ligne.",
+    },
   };
 }
 
-export async function estimateScope3(companyId, userId, { periodStart, periodEnd, amountMad }) {
-  const sector = await getCompanySector(companyId);
-  const [{ factor: ratio, error: ratioError }, { rate, error: rateError }] = await Promise.all([
-    getFactorForPeriodOrExplain(scope3RatioFactorCode(sector), ['scope3_ratio'], periodStart, periodEnd),
-    getExchangeRateForPeriodOrExplain(periodStart, periodEnd),
-  ]);
-
-  const missing = [ratioError, rateError].filter(Boolean);
-  if (missing.length > 0) {
-    throw new AppError(422, `Estimation Scope 3 impossible. ${missing.join(' ')}`);
-  }
-
-  const amountEur = amountMad / Number(rate.rate);
-  const amountKeur = amountEur / 1000;
-  const tco2e = (amountKeur * Number(ratio.value_kgco2e)) / 1000;
-
-  return withTransaction(async (client) => {
-    const entryResult = await client.query(
-      `INSERT INTO activity_entries
-         (company_id, site_id, period_start, period_end, factor_code, quantity, entered_by)
-       VALUES ($1, NULL, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [companyId, periodStart, periodEnd, ratio.code, amountKeur, userId],
-    );
-    const entryId = entryResult.rows[0].id;
-
-    const resultInsert = await client.query(
-      `INSERT INTO emission_results (activity_entry_id, emission_factor_id, scope, tco2e, exchange_rate_id)
-       VALUES ($1, $2, 3, $3, $4)
-       RETURNING id, tco2e, calculated_at`,
-      [entryId, ratio.id, tco2e, rate.id],
-    );
-
-    return {
-      entryId,
-      resultId: resultInsert.rows[0].id,
-      tco2e: Number(resultInsert.rows[0].tco2e),
-      calculatedAt: resultInsert.rows[0].calculated_at,
-      amountMad,
-      amountEur,
-      amountKeur,
-      ratioUsed: { code: ratio.code, valueKgco2ePerKeur: Number(ratio.value_kgco2e), source: ratio.source },
-      rateUsed: { rate: Number(rate.rate), source: rate.source, validFrom: rate.valid_from },
-      uncertainty: SCOPE3_RATIO_UNCERTAINTY,
-    };
-  });
+export async function estimateScope3() {
+  throw new AppError(
+    410,
+    "L'estimation Scope 3 par ratio sectoriel global n'est plus proposée. Saisissez vos achats par catégorie (données d'activité → Scope 3), avec un facteur adapté à chaque catégorie.",
+  );
 }
 
 export async function listScope3Estimates(companyId) {
@@ -427,3 +480,4 @@ export async function listScope3Estimates(companyId) {
   );
   return result.rows;
 }
+
